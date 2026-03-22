@@ -896,15 +896,7 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
     <div class="a4-container relative" id="pdf-content">
         <header class="flex justify-between items-start border-b border-gray-800 pb-3 mb-4">
             <div class="w-36 shrink-0">
-                <svg viewBox="60 20 280 160" xmlns="http://www.w3.org/2000/svg" class="w-full h-auto">
-                    <path d="m200 25 135 47v56l-135 47-135-47V72z" fill="#C51D23" stroke="#C51D23" stroke-width="8" stroke-linejoin="round"/>
-                    <path d="m200 25 135 47v56l-135 47-135-47V72z" fill="none" stroke="#B08D57" stroke-width="1" stroke-linejoin="round"/>
-                    <text x="200" y="86" font-family="Times, serif" font-size="36" font-weight="bold" text-anchor="middle" fill="#404040">LA</text>
-                    <text x="200" y="85" font-family="Times, serif" font-size="36" font-weight="bold" text-anchor="middle" fill="#FFF">LA</text>
-                    <text x="200" y="121" font-family="Times, serif" font-size="42" font-weight="bold" text-anchor="middle" fill="#404040">GENOVESA</text>
-                    <text x="200" y="120" font-family="Times, serif" font-size="42" font-weight="bold" text-anchor="middle" fill="#FFF">GENOVESA</text>
-                    <text x="200" y="145" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#FFF" letter-spacing="3">DESDE 1977</text>
-                </svg>
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='60 20 280 160'%3E%3Cpath d='m200 25 135 47v56l-135 47-135-47V72z' fill='%23C51D23' stroke='%23C51D23' stroke-width='8' stroke-linejoin='round'/%3E%3Cpath d='m200 25 135 47v56l-135 47-135-47V72z' fill='none' stroke='%23B08D57' stroke-width='1' stroke-linejoin='round'/%3E%3Ctext x='200' y='86' font-family='Times, serif' font-size='36' font-weight='bold' text-anchor='middle' fill='%23404040'%3ELA%3C/text%3E%3Ctext x='200' y='85' font-family='Times, serif' font-size='36' font-weight='bold' text-anchor='middle' fill='%23FFF'%3ELA%3C/text%3E%3Ctext x='200' y='121' font-family='Times, serif' font-size='42' font-weight='bold' text-anchor='middle' fill='%23404040'%3EGENOVESA%3C/text%3E%3Ctext x='200' y='120' font-family='Times, serif' font-size='42' font-weight='bold' text-anchor='middle' fill='%23FFF'%3EGENOVESA%3C/text%3E%3Ctext x='200' y='145' font-family='Arial, sans-serif' font-size='12' text-anchor='middle' fill='%23FFF' letter-spacing='3'%3EDESDE 1977%3C/text%3E%3C/svg%3E" class="w-full h-auto" alt="Logo La Genovesa">
             </div>
             <div class="text-right flex flex-col justify-center mt-2">
                 <h1 class="text-lg font-bold text-gray-900 uppercase tracking-tight">Cargo de Embalajes</h1>
