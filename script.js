@@ -469,6 +469,7 @@ async function handleFormSubmit(e) {
         choferNombre: choferCat ? choferCat.NOMBRE : chofer,
         placa: vehiculoCat ? vehiculoCat.DISPLAY_NAME : vehiculo,
         hora: fechaFormat,
+        firmaCargo: firmaImagen,
         detalles: AppState.cargoItems.map(i => ({
           LLEVA: i.cantidad,
           DESTINO: i.destinoId,
