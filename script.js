@@ -17,6 +17,78 @@ const AppState = {
 };
 
 // ==========================================
+// MOTOR DE FIRMA DIGITAL (CANVAS)
+// ==========================================
+let signaturePad, signatureCtx;
+let isDrawing = false;
+let isSignatureEmpty = true;
+
+function initSignaturePad() {
+  signaturePad = document.getElementById('signaturePad');
+  signatureCtx = signaturePad.getContext('2d');
+  
+  function resizeCanvas() {
+    const rect = signaturePad.parentElement.getBoundingClientRect();
+    signaturePad.width = rect.width;
+    signaturePad.height = rect.height;
+    signatureCtx.lineCap = 'round';
+    signatureCtx.lineJoin = 'round';
+    signatureCtx.lineWidth = 3;
+    signatureCtx.strokeStyle = '#000000'; // Tinta negra
+  }
+  
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  const getPos = (e) => {
+    const rect = signaturePad.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  };
+
+  const startDrawing = (e) => {
+    isDrawing = true;
+    isSignatureEmpty = false;
+    signatureCtx.beginPath();
+    const pos = getPos(e);
+    signatureCtx.moveTo(pos.x, pos.y);
+    e.preventDefault();
+  };
+
+  const draw = (e) => {
+    if (!isDrawing) return;
+    const pos = getPos(e);
+    signatureCtx.lineTo(pos.x, pos.y);
+    signatureCtx.stroke();
+    e.preventDefault();
+  };
+
+  const stopDrawing = () => {
+    isDrawing = false;
+    signatureCtx.closePath();
+  };
+
+  // Eventos Mouse
+  signaturePad.addEventListener('mousedown', startDrawing);
+  signaturePad.addEventListener('mousemove', draw);
+  signaturePad.addEventListener('mouseup', stopDrawing);
+  signaturePad.addEventListener('mouseout', stopDrawing);
+  // Eventos Touch (Móviles)
+  signaturePad.addEventListener('touchstart', startDrawing, { passive: false });
+  signaturePad.addEventListener('touchmove', draw, { passive: false });
+  signaturePad.addEventListener('touchend', stopDrawing);
+
+  // Limpiar Pizarra
+  document.getElementById('btnClearSignature').addEventListener('click', limpiarFirma);
+}
+
+function limpiarFirma() {
+  signatureCtx.clearRect(0, 0, signaturePad.width, signaturePad.height);
+  isSignatureEmpty = true;
+}
+
+// ==========================================
 // SISTEMA DE ALERTAS PERSONALIZADO
 // ==========================================
 function mostrarAlerta(mensaje, tipo = "warning", titulo = "") {
@@ -82,6 +154,7 @@ async function initApp() {
     });
 
     construirUI();
+    initSignaturePad();
     actualizarStatus("Conectado y Listo", "emerald");
   } catch (err) {
     actualizarStatus("Error Interno", "red");
@@ -332,7 +405,11 @@ async function handleFormSubmit(e) {
   if (!chofer) return mostrarAlerta("Es obligatorio seleccionar un CHOFER para emitir el cargo.", "error", "Falta Chofer");
   if (!vehiculo) return mostrarAlerta("Es obligatorio seleccionar la PLACA del vehículo.", "error", "Falta Vehículo");
   if (AppState.cargoItems.length === 0) return mostrarAlerta("Debes añadir al menos un MATERIAL a la lista de viaje antes de emitir el cargo.", "error", "Lista de Viaje Vacía");
+// NUEVA VALIDACIÓN: LA FIRMA
+  if (isSignatureEmpty) return mostrarAlerta("El chofer debe firmar la conformidad del cargo.", "error", "Firma Requerida");
 
+  // Capturamos la firma como imagen en código (Base64)
+  const firmaImagen = signaturePad.toDataURL("image/png");
   // TRUCO ANTI-POPUP BLOCKER: Abrimos la pestaña antes de consultar al servidor
   const printTab = window.open("", "_blank");
   printTab.document.write(`
@@ -357,6 +434,7 @@ async function handleFormSubmit(e) {
       chofer,
       vehiculo,
       area,
+      firma: firmaImagen,
       materiales: AppState.cargoItems.map((i) => ({
         id_memb: i.materialId,
         materialName: i.materialName,
@@ -377,6 +455,7 @@ async function handleFormSubmit(e) {
     const result = await res.json();
     if (result.status === "success") {
       const idGenerado = result.data.idCargo;
+      
 
       // 1. CONSTRUIR CARGO TEMPORAL (Para imprimir instantáneamente sin hacer otro fetch)
       const choferCat = AppState.datos.choferes.find(c => c.ID_CHFR === chofer);
@@ -407,6 +486,7 @@ async function handleFormSubmit(e) {
       ["hdArea", "hdChofer", "hdVehiculo", "hdDestino", "hdMaterial"].forEach((id) => (document.getElementById(id).value = ""));
       AppState.cargoItems = [];
       renderizarListaItems();
+      limpiarFirma();
 
     } else {
       if(printTab && !printTab.closed) printTab.close(); // Si falla, cerramos la pestaña
