@@ -703,6 +703,7 @@ function abrirDetalle(idCargo) {
       inputsRetorna[0].focus();
     }
   }, 50);
+  }
 
 async function procesarLiquidacionModal(btnElement, idCargo) {
   const inputs = document.querySelectorAll(".mdl-return-input:not([disabled])");
