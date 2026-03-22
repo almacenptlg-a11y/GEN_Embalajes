@@ -812,9 +812,8 @@ function cerrarDetalle() {
 }
 
 // ==========================================
-// MOTOR DE IMPRESIÓN Y PDF (NUEVA PESTAÑA)
+// MOTOR DE IMPRESIÓN Y PDF (FORMATO COMPACTO / MEDIA HOJA)
 // ==========================================
-// Añadimos el parámetro opcional "targetWindow"
 function generarDocumentoImpresion(idCargo, targetWindow = null) {
   const cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
   if (!cargo) return;
@@ -824,6 +823,7 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
   const destinosSet = new Set();
   const resumenTipos = {};
 
+  // TABLA COMPACTADA: py-1 px-2 en lugar de py-2 px-4
   const filasTablaHTML = cargo.detalles.map((d) => {
       const lleva = parseInt(d.LLEVA || 0);
       totalLlevado += lleva;
@@ -842,17 +842,18 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
 
       return `
       <tr>
-        <td class="py-2 px-4 border-b border-gray-200 text-gray-600">${nombreDestino}</td>
-        <td class="py-2 px-4 border-b border-gray-200 font-medium text-gray-800">${nombreMaterial}</td>
-        <td class="py-2 px-4 border-b border-gray-200 text-center font-bold text-gray-900">${lleva}</td>
-        <td class="py-2 px-4 border-b border-gray-200 text-center"></td>
+        <td class="py-1 px-2 border-b border-gray-200 text-gray-600">${nombreDestino}</td>
+        <td class="py-1 px-2 border-b border-gray-200 font-medium text-gray-800">${nombreMaterial}</td>
+        <td class="py-1 px-2 border-b border-gray-200 text-center font-bold text-gray-900">${lleva}</td>
+        <td class="py-1 px-2 border-b border-gray-200 text-center"></td>
       </tr>
     `;
     }).join("");
 
   const destinosHTML = Array.from(destinosSet).map((dest) => `<div>• ${dest}</div>`).join("");
   const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span class="font-bold mr-1">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
-  // Traductor del Área de Emisión
+  
+  // Traductor del Área
   const areaRaw = cargo.detalles[0]?.AREA || cargo.area || "Almacén PT";
   const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
   const areaResponsable = areaCat ? areaCat.REFERENCIA : areaRaw;
@@ -867,17 +868,19 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        .a4-container { max-width: 21cm; min-height: 29.7cm; margin: 2rem auto; background: white; padding: 2cm; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+        /* COMPRESIÓN: Quitamos el min-height:29.7cm para que ocupe solo lo necesario. Padding reducido a 1cm */
+        .a4-container { max-width: 21cm; margin: 1rem auto; background: white; padding: 1cm; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
         #lista tr:nth-child(even) { background-color: #f9fafb; }
         @media print {
             body { background-color: white; }
-            .a4-container { margin: 0; padding: 0; box-shadow: none; max-width: 100%; min-height: auto; }
+            .a4-container { margin: 0; padding: 0; box-shadow: none; max-width: 100%; }
             .no-print { display: none !important; }
-            @page { size: A4 portrait; margin: 1.5cm; }
+            /* COMPRESIÓN: Margen de hoja de 0.5cm */
+            @page { size: A4 portrait; margin: 0.5cm; }
         }
     </style>
 </head>
-<body class="text-gray-800 antialiased">
+<body class="text-gray-800 antialiased text-xs">
 
     <div class="fixed bottom-6 right-6 flex flex-col gap-3 no-print z-50">
         <button onclick="window.print()" class="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white px-5 py-3 rounded-full shadow-lg font-semibold transition-transform transform hover:scale-105">
@@ -891,8 +894,8 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
     </div>
 
     <div class="a4-container relative" id="pdf-content">
-        <header class="flex justify-between items-start border-b-2 border-gray-800 pb-6 mb-6">
-            <div class="w-48 shrink-0">
+        <header class="flex justify-between items-start border-b border-gray-800 pb-3 mb-4">
+            <div class="w-36 shrink-0">
                 <svg viewBox="60 20 280 160" xmlns="http://www.w3.org/2000/svg" class="w-full h-auto">
                     <path d="m200 25 135 47v56l-135 47-135-47V72z" fill="#C51D23" stroke="#C51D23" stroke-width="8" stroke-linejoin="round"/>
                     <path d="m200 25 135 47v56l-135 47-135-47V72z" fill="none" stroke="#B08D57" stroke-width="1" stroke-linejoin="round"/>
@@ -903,48 +906,48 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
                     <text x="200" y="145" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#FFF" letter-spacing="3">DESDE 1977</text>
                 </svg>
             </div>
-            <div class="text-right flex flex-col justify-center mt-4">
-                <h1 class="text-xl font-bold text-gray-900 uppercase tracking-tight">Cargo de Materiales de Embalaje</h1>
-                <p class="text-sm font-semibold text-gray-600 mt-1">La Genovesa Agroindustrias S.A.</p>
-                <p class="text-xs text-gray-500 uppercase tracking-wider mt-0.5">${areaResponsable}</p>
+            <div class="text-right flex flex-col justify-center mt-2">
+                <h1 class="text-lg font-bold text-gray-900 uppercase tracking-tight">Cargo de Embalajes</h1>
+                <p class="text-xs font-semibold text-gray-600 mt-0.5">La Genovesa Agroindustrias S.A.</p>
+                <p class="text-[10px] text-gray-500 uppercase tracking-wider mt-0.5">${areaResponsable}</p>
             </div>
         </header>
 
-        <section class="grid grid-cols-2 gap-x-8 gap-y-4 mb-8 bg-gray-50 p-5 rounded-lg border border-gray-200">
+        <section class="grid grid-cols-2 gap-x-6 gap-y-2 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
             <div>
-                <p class="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Documento</p>
-                <p class="text-sm"><span class="font-semibold text-gray-900">N° Cargo:</span> <span class="font-mono bg-white border border-gray-300 px-1.5 py-0.5 rounded ml-1">${cargo.idCargo}</span></p>
-                <p class="text-sm mt-1.5"><span class="font-semibold text-gray-900">Emisión:</span> ${cargo.hora || "--"}</p>
+                <p class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-0.5">Documento</p>
+                <p class="text-xs"><span class="font-semibold text-gray-900">N° Cargo:</span> <span class="font-mono bg-white border border-gray-300 px-1 py-0.5 rounded ml-1">${cargo.idCargo}</span></p>
+                <p class="text-xs mt-1"><span class="font-semibold text-gray-900">Emisión:</span> ${cargo.hora || "--"}</p>
             </div>
             <div>
-                <p class="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Transporte</p>
-                <p class="text-sm"><span class="font-semibold text-gray-900">Chofer:</span> <span class="capitalize">${cargo.choferNombre}</span></p>
-                <p class="text-sm mt-1.5"><span class="font-semibold text-gray-900">Vehículo:</span> <span class="font-mono bg-white border border-gray-300 px-1.5 py-0.5 rounded ml-1">${cargo.placa || "S/N"}</span></p>
+                <p class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-0.5">Transporte</p>
+                <p class="text-xs"><span class="font-semibold text-gray-900">Chofer:</span> <span class="capitalize">${cargo.choferNombre}</span></p>
+                <p class="text-xs mt-1"><span class="font-semibold text-gray-900">Vehículo:</span> <span class="font-mono bg-white border border-gray-300 px-1 py-0.5 rounded ml-1">${cargo.placa || "S/N"}</span></p>
             </div>
         </section>
 
-        <section class="mb-6">
-            <table class="w-full text-left border-collapse text-sm">
+        <section class="mb-4">
+            <table class="w-full text-left border-collapse text-xs">
                 <thead>
-                    <tr class="bg-gray-800 text-white text-xs uppercase tracking-wider">
-                        <th class="py-3 px-4 rounded-tl-lg w-1/3">Destino</th>
-                        <th class="py-3 px-4 w-1/3">Material</th>
-                        <th class="py-3 px-4 text-center">Lleva</th>
-                        <th class="py-3 px-4 text-center rounded-tr-lg">Devolución</th>
+                    <tr class="bg-gray-800 text-white text-[10px] uppercase tracking-wider">
+                        <th class="py-1.5 px-2 rounded-tl w-1/3">Destino</th>
+                        <th class="py-1.5 px-2 w-1/3">Material</th>
+                        <th class="py-1.5 px-2 text-center">Lleva</th>
+                        <th class="py-1.5 px-2 text-center rounded-tr">Devolución</th>
                     </tr>
                 </thead>
                 <tbody id="lista" class="border border-gray-200">
                     ${filasTablaHTML}
                 </tbody>
                 <tfoot>
-                    <tr class="bg-gray-100 border-t-2 border-gray-300">
-                        <td colspan="2" class="py-3 px-4 text-right font-bold text-gray-600 uppercase text-xs tracking-wider">
+                    <tr class="bg-gray-100 border-t border-gray-300">
+                        <td colspan="2" class="py-2 px-2 text-right font-bold text-gray-600 uppercase text-[10px] tracking-wider">
                             Total General del Viaje:
                         </td>
-                        <td class="py-3 px-4 text-center font-black text-blue-700 text-lg">
-                            ${totalLlevado} <span class="text-[10px] text-gray-500 font-bold ml-0.5 uppercase">und</span>
+                        <td class="py-2 px-2 text-center font-black text-blue-700 text-base">
+                            ${totalLlevado} <span class="text-[9px] text-gray-500 font-bold uppercase">und</span>
                         </td>
-                        <td class="py-3 px-4 text-center font-mono text-emerald-600 font-bold text-sm">
+                        <td class="py-2 px-2 text-center font-mono text-emerald-600 font-bold text-xs">
                             ${totalM3Llevado.toFixed(3)} m³
                         </td>
                     </tr>
@@ -952,24 +955,24 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
             </table>
         </section>
 
-        <section class="grid grid-cols-12 gap-6 mt-6">
+        <section class="grid grid-cols-12 gap-4 mt-4">
             <div class="col-span-4">
-                <h4 class="text-xs font-bold text-gray-500 uppercase border-b border-gray-200 pb-1 mb-2">Destinos</h4>
-                <div class="text-xs text-gray-700 space-y-1 leading-relaxed">${destinosHTML}</div>
+                <h4 class="text-[10px] font-bold text-gray-500 uppercase border-b border-gray-200 pb-0.5 mb-1">Destinos</h4>
+                <div class="text-[10px] text-gray-700 space-y-0.5 leading-snug">${destinosHTML}</div>
             </div>
             <div class="col-span-4">
-                <h4 class="text-xs font-bold text-gray-500 uppercase border-b border-gray-200 pb-1 mb-2">Tipos de Material</h4>
-                <div class="text-xs text-gray-700 space-y-1 font-mono leading-relaxed">${tiposHTML}</div>
+                <h4 class="text-[10px] font-bold text-gray-500 uppercase border-b border-gray-200 pb-0.5 mb-1">Tipos de Material</h4>
+                <div class="text-[10px] text-gray-700 space-y-0.5 font-mono leading-snug">${tiposHTML}</div>
             </div>
             <div class="col-span-4 flex flex-col justify-end items-center pt-2">
-                <div class="w-full max-w-[200px] border-b-2 border-gray-800 border-dashed pb-2 flex justify-center mb-2 min-h-[80px]"></div>
-                <p class="text-xs font-bold text-gray-900 uppercase text-center w-full truncate" title="${cargo.choferNombre}">${cargo.choferNombre}</p>
-                <p class="text-[10px] text-gray-500 uppercase text-center mt-0.5">Firma de Conformidad</p>
+                <div class="w-full max-w-[180px] border-b border-gray-800 border-dashed pb-1 flex justify-center mb-1 min-h-[50px]"></div>
+                <p class="text-[10px] font-bold text-gray-900 uppercase text-center w-full truncate" title="${cargo.choferNombre}">${cargo.choferNombre}</p>
+                <p class="text-[9px] text-gray-500 uppercase text-center mt-0.5">Firma de Conformidad</p>
             </div>
         </section>
         
-        <div class="absolute bottom-4 left-0 w-full text-center text-[10px] text-gray-400 no-print" style="display: none;">
-            Documento generado electrónicamente por Sistema GenLogistics
+        <div class="absolute bottom-2 left-0 w-full text-center text-[9px] text-gray-400 no-print" style="display: none;">
+            Documento generado por Sistema GenLogistics
         </div>
     </div>
 
@@ -980,7 +983,7 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
             btnContainer.style.display = 'none';
             const element = document.getElementById('pdf-content');
             const opt = {
-                margin: [10, 10, 10, 10],
+                margin: [5, 5, 5, 5], // COMPRESIÓN: Márgenes de hoja a 5mm
                 filename: document.title + '.pdf',
                 image: { type: 'jpeg', quality: 1 },
                 html2canvas: { scale: 2, useCORS: true, letterRendering: true }, 
