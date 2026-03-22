@@ -633,7 +633,7 @@ function abrirDetalle(idCargo) {
   document.getElementById("mdlTiposCount").textContent = `(${arrTiposKeys.length})`;
   document.getElementById("mdlTiposList").innerHTML = arrTiposKeys.map((tipo) => `<div class="truncate" title="${tipo}"><span class="text-emerald-400 font-bold mr-1">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
 
-  // TOTALES EN EL ENCABEZADO DE LA TABLA DEL MODAL
+ // TOTALES EN EL ENCABEZADO DE LA TABLA DEL MODAL
   document.getElementById("mdlTotalMateriales").outerHTML = `
     <span id="mdlTotalMateriales" class="flex items-center gap-2">
       <span class="bg-gray-700 text-white px-2 py-0.5 rounded text-sm">${totalMaterialesLlevados}</span>
@@ -643,23 +643,25 @@ function abrirDetalle(idCargo) {
     </span>
   `;
 
+  // CORRECCIÓN: Se eliminó 'truncate', 'max-w-[]' y 'whitespace-nowrap'. 
+  // Ahora el texto fluye naturalmente hacia abajo y la tabla respeta el ancho del modal.
   const tablaHTML = detallesProcesados.map((det) => `
     <tr class="hover:bg-gray-800/50 transition-colors border-b border-gray-800 last:border-0 ${det.deuda <= 0 ? "opacity-60 bg-gray-900/30" : ""}">
-      <td class="px-3 py-3 truncate max-w-[120px] text-gray-400" title="${det.nombreDestino}">${det.nombreDestino}</td>
-      <td class="px-3 py-3">
-        <div class="truncate max-w-[150px] ${det.deuda <= 0 ? "text-gray-500" : "text-gray-200"}" title="${det.nombreMaterial}">${det.nombreMaterial}</div>
-        <div class="text-[10px] text-emerald-400/80 font-mono mt-0.5">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
+      <td class="px-3 py-3 text-gray-400 align-middle">${det.nombreDestino}</td>
+      <td class="px-3 py-3 align-middle">
+        <div class="${det.deuda <= 0 ? "text-gray-500" : "text-gray-200"} font-medium leading-snug">${det.nombreMaterial}</div>
+        <div class="text-[10px] text-emerald-400/80 font-mono mt-1">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
       </td>
-      <td class="px-3 py-3">
-         <div class="flex items-center justify-center gap-3 text-xs bg-gray-900/50 rounded-lg p-1.5 border border-gray-700">
-            <div class="flex flex-col items-center"><span class="text-[10px] text-gray-500 uppercase">Lleva</span><span class="text-white font-bold">${det.lleva}</span></div>
+      <td class="px-3 py-3 align-middle">
+         <div class="flex items-center justify-center gap-2 md:gap-3 text-xs bg-gray-900/50 rounded-lg p-1.5 border border-gray-700 w-max mx-auto">
+            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Lleva</span><span class="text-white font-bold">${det.lleva}</span></div>
             <div class="w-px h-6 bg-gray-700"></div>
-            <div class="flex flex-col items-center"><span class="text-[10px] text-gray-500 uppercase">Devuelto</span><span class="text-emerald-400 font-bold">${det.devuelve}</span></div>
+            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Devuelto</span><span class="text-emerald-400 font-bold">${det.devuelve}</span></div>
             <div class="w-px h-6 bg-gray-700"></div>
-            <div class="flex flex-col items-center"><span class="text-[10px] text-gray-500 uppercase">Deuda</span><span class="${det.deuda > 0 ? "text-red-400" : det.deuda < 0 ? "text-amber-400" : "text-gray-500"} font-bold">${det.deuda}</span></div>
+            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Deuda</span><span class="${det.deuda > 0 ? "text-red-400" : det.deuda < 0 ? "text-amber-400" : "text-gray-500"} font-bold">${det.deuda}</span></div>
          </div>
       </td>
-      <td class="px-3 py-3">
+      <td class="px-3 py-3 align-middle w-24">
         <input type="number" min="0" data-id="${det.ID_DETALLE}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
                class="w-full bg-gray-900 border border-gray-600 rounded p-1.5 text-center text-emerald-400 font-bold focus:border-emerald-500 outline-none mdl-return-input transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-800"
                ${det.deuda <= 0 ? "disabled" : ""}>
@@ -667,6 +669,8 @@ function abrirDetalle(idCargo) {
     </tr>
   `).join("");
   
+  // CORRECCIÓN: Quitamos 'whitespace-nowrap' de la etiqueta <table>
+  document.getElementById("mdlTablaMateriales").parentNode.className = "w-full text-left text-xs text-gray-300";
   document.getElementById("mdlTablaMateriales").innerHTML = tablaHTML;
 
   document.getElementById("btnLiquidarModal").setAttribute("onclick", `procesarLiquidacionModal(this, '${cargo.idCargo}')`);
@@ -699,7 +703,6 @@ function abrirDetalle(idCargo) {
       inputsRetorna[0].focus();
     }
   }, 50);
-}
 
 async function procesarLiquidacionModal(btnElement, idCargo) {
   const inputs = document.querySelectorAll(".mdl-return-input:not([disabled])");
