@@ -7,16 +7,13 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-Q
 
 const AppState = {
   datos: {
-    choferes: [],
-    vehiculos: [],
-    destinos: [],
-    materiales: [],
-    areas: []
+    choferes: [], vehiculos: [], destinos: [], materiales: [], areas: []
   },
   cargoItems: [],
   cargosActivos: [],
+  sortConfig: { key: "fecha", asc: false },
   historial: [],
-  sortConfig: { key: "fecha", asc: false }
+  sortHistoryConfig: { key: "horaCargo", asc: false } // <--- NUEVO
 };
 
 // ==========================================
@@ -1021,9 +1018,24 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
 // ==========================================
 document.getElementById("btnRefreshHistorico").addEventListener("click", cargarHistorico);
 document.getElementById("inBuscarHistorico").addEventListener("input", renderizarHistorico);
-// NUEVO: Escuchadores para los rangos de fecha
 document.getElementById("inDesdeHistorico").addEventListener("change", renderizarHistorico);
 document.getElementById("inHastaHistorico").addEventListener("change", renderizarHistorico);
+
+// MOTOR DE ORDENAMIENTO PARA HISTÓRICO
+window.setHistorySort = function (key) {
+  if (AppState.sortHistoryConfig.key === key) {
+    AppState.sortHistoryConfig.asc = !AppState.sortHistoryConfig.asc;
+  } else {
+    AppState.sortHistoryConfig.key = key;
+    AppState.sortHistoryConfig.asc = true;
+  }
+  renderizarHistorico();
+};
+
+function getHistorySortIcon(key) {
+  if (AppState.sortHistoryConfig.key !== key) return `<span class="text-gray-600 ml-1">↕</span>`;
+  return AppState.sortHistoryConfig.asc ? `<span class="text-blue-400 ml-1">↑</span>` : `<span class="text-blue-400 ml-1">↓</span>`;
+}
 
 async function cargarHistorico() {
   const grid = document.getElementById("gridHistorico");
@@ -1044,8 +1056,8 @@ async function cargarHistorico() {
 function renderizarHistorico() {
   const grid = document.getElementById("gridHistorico");
   const searchTerm = document.getElementById("inBuscarHistorico").value.toLowerCase().trim();
-  const fechaDesde = document.getElementById("inDesdeHistorico").value; // Formato YYYY-MM-DD
-  const fechaHasta = document.getElementById("inHastaHistorico").value; // Formato YYYY-MM-DD
+  const fechaDesde = document.getElementById("inDesdeHistorico").value; 
+  const fechaHasta = document.getElementById("inHastaHistorico").value; 
 
   // 1. Traducción inteligente (IDs a Nombres Reales)
   let filtrados = AppState.historial.map(det => {
@@ -1066,11 +1078,9 @@ function renderizarHistorico() {
   if (fechaDesde || fechaHasta) {
     filtrados = filtrados.filter(item => {
       if (!item.horaCargo) return false;
-      
-      // Parseo: Google Sheets envía "28/02/2026 15:30:00", lo convertimos a "YYYY-MM-DD"
       const datePart = item.horaCargo.split(' ')[0]; 
       const parts = datePart.split('/');
-      if(parts.length !== 3) return true; // Si por error no tiene formato fecha, lo mostramos
+      if(parts.length !== 3) return true; 
       
       const itemDateISO = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
       
@@ -1095,24 +1105,53 @@ function renderizarHistorico() {
     });
   }
 
+  // 4. APLICAR ORDENAMIENTO (Clic en Cabeceras)
+  const { key, asc } = AppState.sortHistoryConfig;
+  filtrados.sort((a, b) => {
+    let valA = a[key];
+    let valB = b[key];
+
+    // Lógica numérica para sumas, devoluciones y deudas
+    if (['lleva', 'devuelve', 'deuda'].includes(key)) {
+      valA = parseFloat(valA) || 0;
+      valB = parseFloat(valB) || 0;
+      return asc ? valA - valB : valB - valA;
+    } 
+    // Lógica de fechas (Convierte de formato latino a ISO para ordenar matemáticamente)
+    else if (key === 'horaCargo') {
+      valA = estandarizarFecha(valA);
+      valB = estandarizarFecha(valB);
+    } 
+    // Lógica de texto
+    else {
+      valA = String(valA || "").toLowerCase();
+      valB = String(valB || "").toLowerCase();
+    }
+
+    if (valA < valB) return asc ? -1 : 1;
+    if (valA > valB) return asc ? 1 : -1;
+    return 0;
+  });
+
   if (filtrados.length === 0) {
     grid.innerHTML = `<div class="text-center text-gray-400 py-12 font-bold bg-gray-800/40 rounded-2xl border border-gray-700/50 italic">No se encontraron movimientos que coincidan con los filtros.</div>`;
     return;
   }
 
+  // 5. CONSTRUCCIÓN DE LA TABLA (Ahora con 'onclick' interactivo)
   let html = `
     <div class="overflow-x-auto rounded-xl border border-gray-700/80 shadow-inner max-h-[600px] relative">
       <table class="w-full text-left text-xs text-gray-300 whitespace-nowrap">
-        <thead class="bg-gray-900/95 sticky top-0 border-b border-gray-700 uppercase font-semibold text-gray-500 z-10 backdrop-blur-sm shadow-md">
+        <thead class="bg-gray-900/95 sticky top-0 border-b border-gray-700 uppercase font-semibold text-gray-500 z-10 backdrop-blur-sm shadow-md select-none">
           <tr>
-            <th class="px-4 py-3 border-r border-gray-800/50">Fecha/Hora</th>
-            <th class="px-4 py-3 border-r border-gray-800/50">ID Cargo</th>
-            <th class="px-4 py-3 border-r border-gray-800/50">Chofer</th>
-            <th class="px-4 py-3 border-r border-gray-800/50">Material</th>
-            <th class="px-4 py-3 border-r border-gray-800/50">Destino</th>
-            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-white">Lleva</th>
-            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-emerald-400">Devuelto</th>
-            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-pink-400">Deuda</th>
+            <th class="px-4 py-3 border-r border-gray-800/50 cursor-pointer hover:text-white transition-colors" onclick="setHistorySort('horaCargo')">Fecha/Hora ${getHistorySortIcon('horaCargo')}</th>
+            <th class="px-4 py-3 border-r border-gray-800/50 cursor-pointer hover:text-white transition-colors" onclick="setHistorySort('idCargo')">ID Cargo ${getHistorySortIcon('idCargo')}</th>
+            <th class="px-4 py-3 border-r border-gray-800/50 cursor-pointer hover:text-white transition-colors" onclick="setHistorySort('choferName')">Chofer ${getHistorySortIcon('choferName')}</th>
+            <th class="px-4 py-3 border-r border-gray-800/50 cursor-pointer hover:text-white transition-colors" onclick="setHistorySort('materialName')">Material ${getHistorySortIcon('materialName')}</th>
+            <th class="px-4 py-3 border-r border-gray-800/50 cursor-pointer hover:text-white transition-colors" onclick="setHistorySort('destinoName')">Destino ${getHistorySortIcon('destinoName')}</th>
+            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-white cursor-pointer hover:text-gray-300 transition-colors" onclick="setHistorySort('lleva')">Lleva ${getHistorySortIcon('lleva')}</th>
+            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-emerald-400 cursor-pointer hover:text-emerald-300 transition-colors" onclick="setHistorySort('devuelve')">Devuelto ${getHistorySortIcon('devuelve')}</th>
+            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-pink-400 cursor-pointer hover:text-pink-300 transition-colors" onclick="setHistorySort('deuda')">Deuda ${getHistorySortIcon('deuda')}</th>
             <th class="px-4 py-3 text-center">Estado</th>
           </tr>
         </thead>
