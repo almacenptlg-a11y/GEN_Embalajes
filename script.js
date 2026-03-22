@@ -329,10 +329,24 @@ async function handleFormSubmit(e) {
   const vehiculo = document.getElementById("hdVehiculo").value;
   const area = document.getElementById("hdArea").value || document.getElementById("inArea").value.trim();
 
+  // VALIDACIONES
   if (!area) return mostrarAlerta("Es obligatorio especificar el ÁREA RESPONSABLE que emite el cargo.", "error", "Falta Área");
   if (!chofer) return mostrarAlerta("Es obligatorio seleccionar un CHOFER para emitir el cargo.", "error", "Falta Chofer");
   if (!vehiculo) return mostrarAlerta("Es obligatorio seleccionar la PLACA del vehículo.", "error", "Falta Vehículo");
   if (AppState.cargoItems.length === 0) return mostrarAlerta("Debes añadir al menos un MATERIAL a la lista de viaje antes de emitir el cargo.", "error", "Lista de Viaje Vacía");
+
+  // TRUCO ANTI-POPUP BLOCKER: Abrimos la pestaña antes de consultar al servidor
+  const printTab = window.open("", "_blank");
+  printTab.document.write(`
+    <style>
+      body { background-color: #111827; color: #f3f4f6; font-family: system-ui, sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+      .spinner { border: 4px solid rgba(255,255,255,0.1); width: 45px; height: 45px; border-radius: 50%; border-left-color: #3b82f6; animation: spin 1s linear infinite; margin-bottom: 1.5rem; }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+    <div class="spinner"></div>
+    <h2 style="margin:0 0 0.5rem 0;">Emitiendo Cargo Oficial...</h2>
+    <p style="color:#9ca3af; font-size: 0.875rem;">Conectando con el servidor. No cierre esta pestaña.</p>
+  `);
 
   const btn = document.getElementById("btnSubmit");
   const txt = btn.innerHTML;
@@ -364,15 +378,44 @@ async function handleFormSubmit(e) {
 
     const result = await res.json();
     if (result.status === "success") {
-      mostrarAlerta(`El viaje ha sido registrado con el ID: ${result.data.idCargo}`, "success", "¡Cargo Emitido!");
+      const idGenerado = result.data.idCargo;
+
+      // 1. CONSTRUIR CARGO TEMPORAL (Para imprimir instantáneamente sin hacer otro fetch)
+      const choferCat = AppState.datos.choferes.find(c => c.ID_CHFR === chofer);
+      const vehiculoCat = AppState.datos.vehiculos.find(v => v.PLACA === vehiculo);
+      
+      const ahora = new Date();
+      const fechaFormat = `${ahora.getDate().toString().padStart(2, '0')}/${(ahora.getMonth()+1).toString().padStart(2, '0')}/${ahora.getFullYear()} ${ahora.getHours().toString().padStart(2, '0')}:${ahora.getMinutes().toString().padStart(2, '0')}:${ahora.getSeconds().toString().padStart(2, '0')}`;
+
+      AppState.cargosActivos.push({
+        idCargo: idGenerado,
+        choferNombre: choferCat ? choferCat.NOMBRE : chofer,
+        placa: vehiculoCat ? vehiculoCat.DISPLAY_NAME : vehiculo,
+        hora: fechaFormat,
+        detalles: AppState.cargoItems.map(i => ({
+          LLEVA: i.cantidad,
+          DESTINO: i.destinoId,
+          MATERIAL: i.materialId,
+          AREA: area
+        }))
+      });
+
+      // 2. LANZAR LA IMPRESIÓN A LA PESTAÑA ABIERTA
+      generarDocumentoImpresion(idGenerado, printTab);
+
+      // 3. LIMPIAR INTERFAZ
+      mostrarAlerta(`El viaje ha sido registrado con el ID: ${idGenerado}`, "success", "¡Cargo Emitido!");
       document.getElementById("cargoForm").reset();
       ["hdArea", "hdChofer", "hdVehiculo", "hdDestino", "hdMaterial"].forEach((id) => (document.getElementById(id).value = ""));
       AppState.cargoItems = [];
       renderizarListaItems();
+
     } else {
+      if(printTab && !printTab.closed) printTab.close(); // Si falla, cerramos la pestaña
       throw new Error(result.message);
     }
   } catch (err) {
+    if(printTab && !printTab.closed) printTab.close(); // Si falla, cerramos la pestaña
     mostrarAlerta("Error del servidor: " + err.message, "error", "Fallo de Emisión");
   } finally {
     btn.innerHTML = txt;
@@ -768,7 +811,8 @@ function cerrarDetalle() {
 // ==========================================
 // MOTOR DE IMPRESIÓN Y PDF (NUEVA PESTAÑA)
 // ==========================================
-function generarDocumentoImpresion(idCargo) {
+// Añadimos el parámetro opcional "targetWindow"
+function generarDocumentoImpresion(idCargo, targetWindow = null) {
   const cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
   if (!cargo) return;
 
@@ -807,7 +851,6 @@ function generarDocumentoImpresion(idCargo) {
   const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span class="font-bold mr-1">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
   const areaResponsable = cargo.detalles[0]?.AREA || "Almacén PT";
 
-  // HTML DE IMPRESIÓN (Totales en el pie de la tabla)
   const htmlPlantilla = `
 <!DOCTYPE html>
 <html lang="es">
@@ -945,8 +988,10 @@ function generarDocumentoImpresion(idCargo) {
 </body>
 </html>`;
 
-  const printWindow = window.open("", "_blank");
-  printWindow.document.open();
-  printWindow.document.write(htmlPlantilla);
-  printWindow.document.close();
+  const printWindow = targetWindow || window.open("", "_blank");
+  if(printWindow) {
+    printWindow.document.open();
+    printWindow.document.write(htmlPlantilla);
+    printWindow.document.close();
+  }
 }
