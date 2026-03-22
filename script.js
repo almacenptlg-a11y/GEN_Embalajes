@@ -831,115 +831,6 @@ function cerrarDetalle() {
 }
 
 // ==========================================
-// MÓDULO: HISTÓRICO DE MOVIMIENTOS
-// ==========================================
-document.getElementById("btnRefreshHistorico").addEventListener("click", cargarHistorico);
-document.getElementById("inBuscarHistorico").addEventListener("input", renderizarHistorico);
-
-async function cargarHistorico() {
-  const grid = document.getElementById("gridHistorico");
-  grid.innerHTML = `<div class="text-center text-blue-400 py-12 animate-pulse font-bold text-lg"><svg class="animate-spin -ml-1 mr-3 h-6 w-6 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Consultando matriz de movimientos...</div>`;
-
-  try {
-    const res = await fetch(`${API_URL}?action=getHistory`, { method: "GET", redirect: "follow" });
-    const json = await res.json();
-    if (json.status !== "success") throw new Error(json.message);
-
-    AppState.historial = json.data;
-    renderizarHistorico();
-  } catch (err) {
-    grid.innerHTML = `<div class="text-center text-red-500 py-8 border border-red-500/50 rounded-xl bg-red-500/10">Error: ${err.message}</div>`;
-  }
-}
-
-function renderizarHistorico() {
-  const grid = document.getElementById("gridHistorico");
-  const searchTerm = document.getElementById("inBuscarHistorico").value.toLowerCase().trim();
-
-  // Traducción inteligente (IDs a Nombres Reales)
-  let filtrados = AppState.historial.map(det => {
-    const materialObj = AppState.datos.materiales.find(m => m.ID_MEMB === det.material);
-    const destinoObj = AppState.datos.destinos.find(d => d.ID_DSTN === det.destino);
-    // Limpiamos la comilla simple (') que usamos en BD para forzar que sea texto
-    const idChoferLimpio = det.chofer ? String(det.chofer).replace(/'/g, '') : '';
-    const choferObj = AppState.datos.choferes.find(c => c.ID_CHFR === idChoferLimpio);
-
-    return {
-      ...det,
-      materialName: materialObj ? materialObj.DESCRIPCION : det.material,
-      destinoName: destinoObj ? destinoObj.REFERENCIA : det.destino,
-      choferName: choferObj ? choferObj.NOMBRE : det.chofer
-    };
-  });
-
-  // Filtro de Búsqueda Multiparamétrico
-  if (searchTerm) {
-    filtrados = filtrados.filter(item => {
-      return (item.idCargo || "").toLowerCase().includes(searchTerm) ||
-             (item.materialName || "").toLowerCase().includes(searchTerm) ||
-             (item.destinoName || "").toLowerCase().includes(searchTerm) ||
-             (item.choferName || "").toLowerCase().includes(searchTerm) ||
-             (item.horaCargo || "").toLowerCase().includes(searchTerm);
-    });
-  }
-
-  if (filtrados.length === 0) {
-    grid.innerHTML = `<div class="text-center text-gray-400 py-12 font-bold bg-gray-800/40 rounded-2xl border border-gray-700/50 italic">No se encontraron movimientos que coincidan con la búsqueda.</div>`;
-    return;
-  }
-
-  let html = `
-    <div class="overflow-x-auto rounded-xl border border-gray-700/80 shadow-inner max-h-[600px] relative">
-      <table class="w-full text-left text-xs text-gray-300 whitespace-nowrap">
-        <thead class="bg-gray-900/95 sticky top-0 border-b border-gray-700 uppercase font-semibold text-gray-500 z-10 backdrop-blur-sm shadow-md">
-          <tr>
-            <th class="px-4 py-3 border-r border-gray-800/50">Fecha/Hora</th>
-            <th class="px-4 py-3 border-r border-gray-800/50">ID Cargo</th>
-            <th class="px-4 py-3 border-r border-gray-800/50">Chofer</th>
-            <th class="px-4 py-3 border-r border-gray-800/50">Material</th>
-            <th class="px-4 py-3 border-r border-gray-800/50">Destino</th>
-            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-white">Lleva</th>
-            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-emerald-400">Devuelto</th>
-            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-pink-400">Deuda</th>
-            <th class="px-4 py-3 text-center">Estado</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-800/60">
-  `;
-
-  filtrados.forEach(row => {
-    let badgeEstadoHTML = "";
-    const deuda = parseInt(row.deuda);
-    
-    // Semáforo visual del Histórico
-    if (deuda > 0) {
-      badgeEstadoHTML = `<span class="bg-pink-600/20 text-pink-400 border border-pink-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Pendiente</span>`;
-    } else if (deuda < 0) {
-      badgeEstadoHTML = `<span class="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Excedente</span>`;
-    } else {
-      badgeEstadoHTML = `<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Cerrado</span>`;
-    }
-
-    html += `
-      <tr class="hover:bg-gray-800/60 transition-colors group">
-        <td class="px-4 py-3.5 font-mono text-gray-500 text-[11px]">${row.horaCargo || '--'}</td>
-        <td class="px-4 py-3.5 font-mono text-blue-400 font-bold tracking-tight">${row.idCargo || '--'}</td>
-        <td class="px-4 py-3.5 truncate max-w-[150px] font-medium text-gray-200" title="${row.choferName}">${row.choferName}</td>
-        <td class="px-4 py-3.5 truncate max-w-[200px]" title="${row.materialName}">${row.materialName}</td>
-        <td class="px-4 py-3.5 truncate max-w-[150px] text-gray-400" title="${row.destinoName}">${row.destinoName}</td>
-        <td class="px-3 py-3.5 text-center text-white font-black bg-gray-900/30">${row.lleva}</td>
-        <td class="px-3 py-3.5 text-center text-emerald-400 font-black bg-emerald-900/10">${row.devuelve}</td>
-        <td class="px-3 py-3.5 text-center ${deuda > 0 ? 'text-pink-400 bg-pink-900/10' : 'text-gray-500'} font-black">${deuda}</td>
-        <td class="px-4 py-3.5 text-center">${badgeEstadoHTML}</td>
-      </tr>
-    `;
-  });
-
-  html += `</tbody></table></div>`;
-  grid.innerHTML = html;
-}
-
-// ==========================================
 // MOTOR DE IMPRESIÓN Y PDF (FORMATO COMPACTO / MEDIA HOJA)
 // ==========================================
 function generarDocumentoImpresion(idCargo, targetWindow = null) {
@@ -1123,4 +1014,138 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
     printWindow.document.write(htmlPlantilla);
     printWindow.document.close();
   }
+}
+
+// ==========================================
+// MÓDULO: HISTÓRICO DE MOVIMIENTOS
+// ==========================================
+document.getElementById("btnRefreshHistorico").addEventListener("click", cargarHistorico);
+document.getElementById("inBuscarHistorico").addEventListener("input", renderizarHistorico);
+// NUEVO: Escuchadores para los rangos de fecha
+document.getElementById("inDesdeHistorico").addEventListener("change", renderizarHistorico);
+document.getElementById("inHastaHistorico").addEventListener("change", renderizarHistorico);
+
+async function cargarHistorico() {
+  const grid = document.getElementById("gridHistorico");
+  grid.innerHTML = `<div class="text-center text-blue-400 py-12 animate-pulse font-bold text-lg"><svg class="animate-spin -ml-1 mr-3 h-6 w-6 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Consultando matriz de movimientos...</div>`;
+
+  try {
+    const res = await fetch(`${API_URL}?action=getHistory`, { method: "GET", redirect: "follow" });
+    const json = await res.json();
+    if (json.status !== "success") throw new Error(json.message);
+
+    AppState.historial = json.data;
+    renderizarHistorico();
+  } catch (err) {
+    grid.innerHTML = `<div class="text-center text-red-500 py-8 border border-red-500/50 rounded-xl bg-red-500/10">Error: ${err.message}</div>`;
+  }
+}
+
+function renderizarHistorico() {
+  const grid = document.getElementById("gridHistorico");
+  const searchTerm = document.getElementById("inBuscarHistorico").value.toLowerCase().trim();
+  const fechaDesde = document.getElementById("inDesdeHistorico").value; // Formato YYYY-MM-DD
+  const fechaHasta = document.getElementById("inHastaHistorico").value; // Formato YYYY-MM-DD
+
+  // 1. Traducción inteligente (IDs a Nombres Reales)
+  let filtrados = AppState.historial.map(det => {
+    const materialObj = AppState.datos.materiales.find(m => m.ID_MEMB === det.material);
+    const destinoObj = AppState.datos.destinos.find(d => d.ID_DSTN === det.destino);
+    const idChoferLimpio = det.chofer ? String(det.chofer).replace(/'/g, '') : '';
+    const choferObj = AppState.datos.choferes.find(c => c.ID_CHFR === idChoferLimpio);
+
+    return {
+      ...det,
+      materialName: materialObj ? materialObj.DESCRIPCION : det.material,
+      destinoName: destinoObj ? destinoObj.REFERENCIA : det.destino,
+      choferName: choferObj ? choferObj.NOMBRE : det.chofer
+    };
+  });
+
+  // 2. Filtro por Rango de Fechas
+  if (fechaDesde || fechaHasta) {
+    filtrados = filtrados.filter(item => {
+      if (!item.horaCargo) return false;
+      
+      // Parseo: Google Sheets envía "28/02/2026 15:30:00", lo convertimos a "YYYY-MM-DD"
+      const datePart = item.horaCargo.split(' ')[0]; 
+      const parts = datePart.split('/');
+      if(parts.length !== 3) return true; // Si por error no tiene formato fecha, lo mostramos
+      
+      const itemDateISO = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      
+      let pasaDesde = true;
+      let pasaHasta = true;
+
+      if (fechaDesde) pasaDesde = itemDateISO >= fechaDesde;
+      if (fechaHasta) pasaHasta = itemDateISO <= fechaHasta;
+
+      return pasaDesde && pasaHasta;
+    });
+  }
+
+  // 3. Filtro de Búsqueda Global (Texto)
+  if (searchTerm) {
+    filtrados = filtrados.filter(item => {
+      return (item.idCargo || "").toLowerCase().includes(searchTerm) ||
+             (item.materialName || "").toLowerCase().includes(searchTerm) ||
+             (item.destinoName || "").toLowerCase().includes(searchTerm) ||
+             (item.choferName || "").toLowerCase().includes(searchTerm) ||
+             (item.horaCargo || "").toLowerCase().includes(searchTerm);
+    });
+  }
+
+  if (filtrados.length === 0) {
+    grid.innerHTML = `<div class="text-center text-gray-400 py-12 font-bold bg-gray-800/40 rounded-2xl border border-gray-700/50 italic">No se encontraron movimientos que coincidan con los filtros.</div>`;
+    return;
+  }
+
+  let html = `
+    <div class="overflow-x-auto rounded-xl border border-gray-700/80 shadow-inner max-h-[600px] relative">
+      <table class="w-full text-left text-xs text-gray-300 whitespace-nowrap">
+        <thead class="bg-gray-900/95 sticky top-0 border-b border-gray-700 uppercase font-semibold text-gray-500 z-10 backdrop-blur-sm shadow-md">
+          <tr>
+            <th class="px-4 py-3 border-r border-gray-800/50">Fecha/Hora</th>
+            <th class="px-4 py-3 border-r border-gray-800/50">ID Cargo</th>
+            <th class="px-4 py-3 border-r border-gray-800/50">Chofer</th>
+            <th class="px-4 py-3 border-r border-gray-800/50">Material</th>
+            <th class="px-4 py-3 border-r border-gray-800/50">Destino</th>
+            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-white">Lleva</th>
+            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-emerald-400">Devuelto</th>
+            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-pink-400">Deuda</th>
+            <th class="px-4 py-3 text-center">Estado</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-800/60">
+  `;
+
+  filtrados.forEach(row => {
+    let badgeEstadoHTML = "";
+    const deuda = parseInt(row.deuda);
+    
+    if (deuda > 0) {
+      badgeEstadoHTML = `<span class="bg-pink-600/20 text-pink-400 border border-pink-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Pendiente</span>`;
+    } else if (deuda < 0) {
+      badgeEstadoHTML = `<span class="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Excedente</span>`;
+    } else {
+      badgeEstadoHTML = `<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Cerrado</span>`;
+    }
+
+    html += `
+      <tr class="hover:bg-gray-800/60 transition-colors group">
+        <td class="px-4 py-3.5 font-mono text-gray-500 text-[11px]">${row.horaCargo || '--'}</td>
+        <td class="px-4 py-3.5 font-mono text-blue-400 font-bold tracking-tight">${row.idCargo || '--'}</td>
+        <td class="px-4 py-3.5 truncate max-w-[150px] font-medium text-gray-200" title="${row.choferName}">${row.choferName}</td>
+        <td class="px-4 py-3.5 truncate max-w-[200px]" title="${row.materialName}">${row.materialName}</td>
+        <td class="px-4 py-3.5 truncate max-w-[150px] text-gray-400" title="${row.destinoName}">${row.destinoName}</td>
+        <td class="px-3 py-3.5 text-center text-white font-black bg-gray-900/30">${row.lleva}</td>
+        <td class="px-3 py-3.5 text-center text-emerald-400 font-black bg-emerald-900/10">${row.devuelve}</td>
+        <td class="px-3 py-3.5 text-center ${deuda > 0 ? 'text-pink-400 bg-pink-900/10' : 'text-gray-500'} font-black">${deuda}</td>
+        <td class="px-4 py-3.5 text-center">${badgeEstadoHTML}</td>
+      </tr>
+    `;
+  });
+
+  html += `</tbody></table></div>`;
+  grid.innerHTML = html;
 }
