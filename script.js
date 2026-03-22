@@ -1053,7 +1053,9 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
                 <div class="text-[10px] text-gray-700 space-y-0.5 font-mono leading-snug">${tiposHTML}</div>
             </div>
             <div class="col-span-4 flex flex-col justify-end items-center pt-2">
-                <div class="w-full max-w-[180px] border-b border-gray-800 border-dashed pb-1 flex justify-center mb-1 min-h-[50px]"></div>
+                <div class="w-full max-w-[180px] border-b border-gray-800 border-dashed pb-1 flex justify-center items-end mb-1 min-h-[50px]">
+                    ${cargo.firmaCargo ? `<img src="${cargo.firmaCargo}" style="max-height: 45px; object-fit: contain;">` : ''}
+                </div>
                 <p class="text-[10px] font-bold text-gray-900 uppercase text-center w-full truncate" title="${cargo.choferNombre}">${cargo.choferNombre}</p>
                 <p class="text-[9px] text-gray-500 uppercase text-center mt-0.5">Firma de Conformidad</p>
             </div>
