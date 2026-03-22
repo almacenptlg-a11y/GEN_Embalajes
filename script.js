@@ -5,7 +5,12 @@
 // ¡REEMPLAZA ESTA URL SI CAMBIAS TU BACKEND!
 const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-QJ6RZdmQw3gJIt80Y6f4iTKyS7BqhXrgHTGWrO0PiSj4m/exec";
 
+// ==========================================
+// 1. ESTADO CENTRALIZADO DE LA APLICACIÓN
+// ==========================================
 const AppState = {
+  user: null,               // <--- ALMACENA DATOS DEL HUB
+  isSessionVerified: false, // <--- BLOQUEO DE SEGURIDAD
   datos: {
     choferes: [], vehiculos: [], destinos: [], materiales: [], areas: []
   },
@@ -13,8 +18,124 @@ const AppState = {
   cargosActivos: [],
   sortConfig: { key: "fecha", asc: false },
   historial: [],
-  sortHistoryConfig: { key: "horaCargo", asc: false } // <--- NUEVO
+  sortHistoryConfig: { key: "horaCargo", asc: false } 
 };
+
+// ==========================================
+// 2. SEGURIDAD Y GESTIÓN DE SESIÓN (INTEGRACIÓN HUB)
+// ==========================================
+
+// Escuchador del iframe (Recibe datos del HUB Principal)
+window.addEventListener('message', (event) => {
+    const { type, user, theme } = event.data || {};
+    
+    // Sincronización de Tema (Dark Mode) si el HUB lo envía
+    if (type === 'THEME_UPDATE') {
+        document.documentElement.classList.toggle('dark', theme === 'dark');
+    }
+
+    // Sincronización de Usuario (Login exitoso en el HUB)
+    if (type === 'SESSION_SYNC' && user) {
+        document.documentElement.classList.toggle('dark', theme === 'dark');
+        
+        AppState.user = user;
+        AppState.isSessionVerified = true;
+        sessionStorage.setItem('moduloEmbalajesUser', JSON.stringify(user));
+        
+        actualizarUIUsuario();
+    }
+});
+
+// Inicialización de la Aplicación
+document.addEventListener('DOMContentLoaded', () => {
+    // 1. Verificar si ya hay una sesión guardada temporalmente
+    const savedUser = sessionStorage.getItem('moduloEmbalajesUser');
+    if (savedUser) {
+        AppState.user = JSON.parse(savedUser);
+        AppState.isSessionVerified = true;
+        actualizarUIUsuario();
+    }
+    
+    // 2. Avisar al HUB Padre que el módulo está cargado y listo para recibir credenciales
+    window.parent.postMessage({ type: 'MODULO_LISTO' }, '*');
+    
+    // 3. Cargar la base de datos (Catálogos) y construir la UI de Embalajes
+    initApp();
+
+    // 4. Temporizador de Seguridad (Si el HUB no responde en 4 segundos, se bloquea)
+    setTimeout(() => {
+        if (!AppState.isSessionVerified) {
+            document.getElementById('status-indicator').innerHTML = '<i class="text-red-500">⚠️</i> Esperando autorización del HUB...';
+            document.getElementById('status-indicator').className = "flex items-center gap-2 text-sm text-red-400 bg-red-400/10 px-3 py-1.5 rounded-full border border-red-400/20 backdrop-blur-md";
+            
+            // Bloqueamos el botón de Emitir por seguridad
+            const btnSubmit = document.getElementById('btnSubmit');
+            if(btnSubmit) btnSubmit.disabled = true;
+        }
+    }, 4000);
+});
+
+// Refresca la barra superior con el nombre del usuario
+function actualizarUIUsuario() {
+    if(!AppState.user) return;
+    
+    // Actualizamos el indicador de estado en la cabecera
+    const statusDiv = document.getElementById('status-indicator');
+    if (statusDiv) {
+        statusDiv.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 mr-1"></span> ${AppState.user.nombre} | ${AppState.user.area}`;
+        statusDiv.className = "flex items-center gap-2 text-sm text-emerald-400 bg-emerald-400/10 px-3 py-1.5 rounded-full border border-emerald-400/20 backdrop-blur-md";
+    }
+
+    // Desbloqueamos el botón de Emitir
+    const btnSubmit = document.getElementById('btnSubmit');
+    if(btnSubmit) btnSubmit.disabled = false;
+}
+
+// Llama al Backend de Apps Script
+async function initApp() {
+  try {
+    const res = await fetch(`${API_URL}?action=getInitData`, { method: "GET", redirect: "follow" });
+    if (!res.ok) throw new Error(`Error de Servidor: Código ${res.status}`);
+
+    const json = await res.json();
+    if (json.status === "error") throw new Error(`El servidor devolvió: ${json.message}`);
+
+    AppState.datos = json.data;
+
+    // Filtramos áreas dinámicamente
+    AppState.datos.areas = AppState.datos.destinos.filter((destino) => {
+      return destino.EMISOR && String(destino.EMISOR).trim().toUpperCase() === "SI";
+    });
+
+    // Fusión de Placa y Marca
+    AppState.datos.vehiculos = AppState.datos.vehiculos.map(v => {
+      v.DISPLAY_NAME = `${v.PLACA} ${v.MARCA || ''}`.trim();
+      return v;
+    });
+
+    construirUI();
+    initSignaturePad();
+    
+    // Solo actualizamos a "Listo" si ya pasó la verificación de seguridad del HUB
+    if(AppState.isSessionVerified) actualizarUIUsuario();
+    
+  } catch (err) {
+    const statusDiv = document.getElementById('status-indicator');
+    if(statusDiv) {
+        statusDiv.innerHTML = "Error Interno";
+        statusDiv.className = "flex items-center gap-2 text-sm text-red-400 bg-red-400/10 px-3 py-1.5 rounded-full border border-red-400/20 backdrop-blur-md";
+    }
+    
+    const panelError = document.getElementById("emptyState");
+    if (panelError) {
+      panelError.innerHTML = `
+        <div class="text-red-400 font-bold mb-2">🚨 SE DETECTÓ UN ERROR 🚨</div>
+        <div class="text-gray-300 text-xs text-left bg-gray-900 p-3 rounded-lg border border-red-500/50 font-mono">${err.message}</div>
+      `;
+      panelError.style.display = "block";
+    }
+  }
+}
 
 // ==========================================
 // MOTOR DE FIRMA DIGITAL (CANVAS)
@@ -435,6 +556,8 @@ async function handleFormSubmit(e) {
       vehiculo,
       area,
       firma: firmaImagen,
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
+      gestorCorreo: AppState.user ? AppState.user.usuario : 'almacenpt@lagenovesa.com.pe',
       materiales: AppState.cargoItems.map((i) => ({
         id_memb: i.materialId,
         materialName: i.materialName,
