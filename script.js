@@ -642,7 +642,10 @@ function abrirDetalle(idCargo) {
   document.getElementById("mdlTitleCargo").textContent = cargo.idCargo;
   document.getElementById("mdlChofer").textContent = cargo.choferNombre;
   document.getElementById("mdlHora").textContent = cargo.hora || "--";
-  document.getElementById("mdlDespacho").textContent = cargo.detalles[0]?.AREA || "Almacén PT";
+  // Traductor del Área en el Modal
+  const areaRaw = cargo.detalles[0]?.AREA || cargo.area || "Almacén PT";
+  const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
+  document.getElementById("mdlDespacho").textContent = areaCat ? areaCat.REFERENCIA : areaRaw;
   document.getElementById("mdlGestor").textContent = cargo.gestor || "No registrado";
 
   const vehiculoObj = AppState.datos.vehiculos.find(v => v.PLACA === cargo.placa);
@@ -849,7 +852,10 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
 
   const destinosHTML = Array.from(destinosSet).map((dest) => `<div>• ${dest}</div>`).join("");
   const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span class="font-bold mr-1">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
-  const areaResponsable = cargo.detalles[0]?.AREA || "Almacén PT";
+  // Traductor del Área de Emisión
+  const areaRaw = cargo.detalles[0]?.AREA || cargo.area || "Almacén PT";
+  const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
+  const areaResponsable = areaCat ? areaCat.REFERENCIA : areaRaw;
 
   const htmlPlantilla = `
 <!DOCTYPE html>
