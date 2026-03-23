@@ -1,16 +1,17 @@
 /**
  * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics)
+ * @security Protocolo Zero-Trust | Iframe Enforcer | Token Auth
  */
 
-// ¡REEMPLAZA ESTA URL SI CAMBIAS TU BACKEND!
 const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-QJ6RZdmQw3gJIt80Y6f4iTKyS7BqhXrgHTGWrO0PiSj4m/exec";
+const API_SECRET_TOKEN = "GEN_EMB_2026_SECURE_KEY"; // <-- NUEVO: Llave de seguridad API
 
-// ==========================================
-// 1. ESTADO CENTRALIZADO DE LA APLICACIÓN
-// ==========================================
+// ⚠️ REEMPLAZA ESTO CON EL DOMINIO REAL DE TU HUB (Ej: "https://intranet.lagenovesa.com")
+const DOMINIO_HUB_PERMITIDO = "https://almacenptlg-a11y.github.io/GenApps/"; // Pon tu dominio aquí para máxima seguridad
+
 const AppState = {
-  user: null,               // <--- ALMACENA DATOS DEL HUB
-  isSessionVerified: false, // <--- BLOQUEO DE SEGURIDAD
+  user: null,               
+  isSessionVerified: false, 
   datos: {
     choferes: [], vehiculos: [], destinos: [], materiales: [], areas: []
   },
@@ -22,79 +23,90 @@ const AppState = {
 };
 
 // ==========================================
-// 2. SEGURIDAD Y GESTIÓN DE SESIÓN (INTEGRACIÓN HUB)
+// 1. SEGURIDAD: IFRAME ENFORCER (Anti-Bypass)
 // ==========================================
+if (window === window.top) {
+    // Si la página se abre fuera de un Iframe, DESTRUIMOS el contenido instantáneamente.
+    document.documentElement.innerHTML = `
+        <body style="background-color: #111827; color: #ef4444; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: sans-serif; text-align: center;">
+            <div>
+                <svg style="width: 80px; height: 80px; margin: 0 auto 20px auto;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                <h1 style="font-size: 2rem; font-weight: bold; margin-bottom: 10px;">ACCESO DENEGADO</h1>
+                <p style="color: #9ca3af;">Este módulo es privado y solo puede ejecutarse dentro del HUB corporativo.</p>
+            </div>
+        </body>
+    `;
+    throw new Error("Ejecución bloqueada por política de seguridad (No-Iframe).");
+}
 
-// Escuchador del iframe (Recibe datos del HUB Principal)
+// ==========================================
+// 2. SEGURIDAD: GESTIÓN DE SESIÓN (INTEGRACIÓN HUB)
+// ==========================================
 window.addEventListener('message', (event) => {
+    // VALIDACIÓN DE ORIGEN (CORS Front)
+    if (DOMINIO_HUB_PERMITIDO !== "*" && event.origin !== DOMINIO_HUB_PERMITIDO) {
+        console.warn("Bloqueo de seguridad: Origen no reconocido.", event.origin);
+        return; 
+    }
+
     const { type, user, theme } = event.data || {};
     
-    // Sincronización de Tema (Dark Mode) si el HUB lo envía
     if (type === 'THEME_UPDATE') {
         document.documentElement.classList.toggle('dark', theme === 'dark');
     }
 
-    // Sincronización de Usuario (Login exitoso en el HUB)
     if (type === 'SESSION_SYNC' && user) {
         document.documentElement.classList.toggle('dark', theme === 'dark');
         
         AppState.user = user;
         AppState.isSessionVerified = true;
-        sessionStorage.setItem('moduloEmbalajesUser', JSON.stringify(user));
         
         actualizarUIUsuario();
+        
+        // 🔒 CARGA DIFERIDA: Solo cuando sabemos quién es el usuario, descargamos la BD.
+        if (AppState.datos.choferes.length === 0) {
+            initApp();
+        }
     }
 });
 
-// Inicialización de la Aplicación
 document.addEventListener('DOMContentLoaded', () => {
-    // 1. Verificar si ya hay una sesión guardada temporalmente
-    const savedUser = sessionStorage.getItem('moduloEmbalajesUser');
-    if (savedUser) {
-        AppState.user = JSON.parse(savedUser);
-        AppState.isSessionVerified = true;
-        actualizarUIUsuario();
-    }
-    
-    // 2. Avisar al HUB Padre que el módulo está cargado y listo para recibir credenciales
+    // Avisamos al HUB Padre que el módulo está listo para recibir la llave
     window.parent.postMessage({ type: 'MODULO_LISTO' }, '*');
     
-    // 3. Cargar la base de datos (Catálogos) y construir la UI de Embalajes
-    initApp();
-
-    // 4. Temporizador de Seguridad (Si el HUB no responde en 4 segundos, se bloquea)
     setTimeout(() => {
         if (!AppState.isSessionVerified) {
-            document.getElementById('status-indicator').innerHTML = '<i class="text-red-500">⚠️</i> Esperando autorización del HUB...';
-            document.getElementById('status-indicator').className = "flex items-center gap-2 text-sm text-red-400 bg-red-400/10 px-3 py-1.5 rounded-full border border-red-400/20 backdrop-blur-md";
-            
-            // Bloqueamos el botón de Emitir por seguridad
+            const statusDiv = document.getElementById('status-indicator');
+            if(statusDiv) {
+                statusDiv.innerHTML = '<i class="text-red-500">⚠️</i> Acceso Restringido';
+                statusDiv.className = "flex items-center gap-2 text-sm text-red-400 bg-red-400/10 px-3 py-1.5 rounded-full border border-red-400/20 backdrop-blur-md";
+            }
             const btnSubmit = document.getElementById('btnSubmit');
             if(btnSubmit) btnSubmit.disabled = true;
         }
     }, 4000);
 });
 
-// Refresca la barra superior con el nombre del usuario
 function actualizarUIUsuario() {
     if(!AppState.user) return;
     
-    // Actualizamos el indicador de estado en la cabecera
     const statusDiv = document.getElementById('status-indicator');
     if (statusDiv) {
         statusDiv.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 mr-1"></span> ${AppState.user.nombre} | ${AppState.user.area}`;
         statusDiv.className = "flex items-center gap-2 text-sm text-emerald-400 bg-emerald-400/10 px-3 py-1.5 rounded-full border border-emerald-400/20 backdrop-blur-md";
     }
 
-    // Desbloqueamos el botón de Emitir
     const btnSubmit = document.getElementById('btnSubmit');
     if(btnSubmit) btnSubmit.disabled = false;
 }
 
-// Llama al Backend de Apps Script
+// ==========================================
+// 3. INICIALIZACIÓN CON TOKEN API
+// ==========================================
 async function initApp() {
   try {
-    const res = await fetch(`${API_URL}?action=getInitData`, { method: "GET", redirect: "follow" });
+    // NUEVO: Enviamos el Token de Seguridad al Backend
+    const res = await fetch(`${API_URL}?action=getInitData&token=${API_SECRET_TOKEN}`, { method: "GET", redirect: "follow" });
     if (!res.ok) throw new Error(`Error de Servidor: Código ${res.status}`);
 
     const json = await res.json();
@@ -102,12 +114,10 @@ async function initApp() {
 
     AppState.datos = json.data;
 
-    // Filtramos áreas dinámicamente
     AppState.datos.areas = AppState.datos.destinos.filter((destino) => {
       return destino.EMISOR && String(destino.EMISOR).trim().toUpperCase() === "SI";
     });
 
-    // Fusión de Placa y Marca
     AppState.datos.vehiculos = AppState.datos.vehiculos.map(v => {
       v.DISPLAY_NAME = `${v.PLACA} ${v.MARCA || ''}`.trim();
       return v;
@@ -116,24 +126,13 @@ async function initApp() {
     construirUI();
     initSignaturePad();
     
-    // Solo actualizamos a "Listo" si ya pasó la verificación de seguridad del HUB
-    if(AppState.isSessionVerified) actualizarUIUsuario();
-    
   } catch (err) {
     const statusDiv = document.getElementById('status-indicator');
     if(statusDiv) {
         statusDiv.innerHTML = "Error Interno";
         statusDiv.className = "flex items-center gap-2 text-sm text-red-400 bg-red-400/10 px-3 py-1.5 rounded-full border border-red-400/20 backdrop-blur-md";
     }
-    
-    const panelError = document.getElementById("emptyState");
-    if (panelError) {
-      panelError.innerHTML = `
-        <div class="text-red-400 font-bold mb-2">🚨 SE DETECTÓ UN ERROR 🚨</div>
-        <div class="text-gray-300 text-xs text-left bg-gray-900 p-3 rounded-lg border border-red-500/50 font-mono">${err.message}</div>
-      `;
-      panelError.style.display = "block";
-    }
+    mostrarAlerta("No se pudo descargar la base de datos. " + err.message, "error", "Error Crítico");
   }
 }
 
