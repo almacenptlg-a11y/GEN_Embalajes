@@ -1270,6 +1270,7 @@ function renderizarHistorico() {
   let filtrados = AppState.historial.map(det => {
     const materialObj = AppState.datos.materiales.find(m => m.ID_MEMB === det.material);
     const destinoObj = AppState.datos.destinos.find(d => d.ID_DSTN === det.destino);
+    const emisorObj = AppState.datos.destinos.find(d => d.ID_DSTN === det.emisor); // Traductor Emisor
     const idChoferLimpio = det.chofer ? String(det.chofer).replace(/'/g, '') : '';
     const choferObj = AppState.datos.choferes.find(c => c.ID_CHFR === idChoferLimpio);
 
@@ -1277,9 +1278,13 @@ function renderizarHistorico() {
       ...det,
       materialName: materialObj ? materialObj.DESCRIPCION : det.material,
       destinoName: destinoObj ? destinoObj.REFERENCIA : det.destino,
+      emisorName: emisorObj ? emisorObj.REFERENCIA : (det.emisor || 'Almacén PT'),
       choferName: choferObj ? choferObj.NOMBRE : det.chofer
     };
   });
+
+  // Guardamos en memoria global para que el Minimodal pueda leerlo al hacer clic
+  AppState.historialFiltrado = filtrados;
 
   // 2. Filtro por Rango de Fechas
   if (fechaDesde || fechaHasta) {
@@ -1318,18 +1323,15 @@ function renderizarHistorico() {
     let valA = a[key];
     let valB = b[key];
 
-    // Lógica numérica para sumas, devoluciones y deudas
     if (['lleva', 'devuelve', 'deuda'].includes(key)) {
       valA = parseFloat(valA) || 0;
       valB = parseFloat(valB) || 0;
       return asc ? valA - valB : valB - valA;
     } 
-    // Lógica de fechas (Convierte de formato latino a ISO para ordenar matemáticamente)
     else if (key === 'horaCargo') {
       valA = estandarizarFecha(valA);
       valB = estandarizarFecha(valB);
     } 
-    // Lógica de texto
     else {
       valA = String(valA || "").toLowerCase();
       valB = String(valB || "").toLowerCase();
@@ -1345,7 +1347,7 @@ function renderizarHistorico() {
     return;
   }
 
-  // 5. CONSTRUCCIÓN DE LA TABLA (Ahora con 'onclick' interactivo)
+  // 5. CONSTRUCCIÓN DE LA TABLA
   let html = `
     <div class="overflow-x-auto rounded-xl border border-gray-700/80 shadow-inner max-h-[600px] relative">
       <table class="w-full text-left text-xs text-gray-300 whitespace-nowrap">
@@ -1379,7 +1381,12 @@ function renderizarHistorico() {
 
     html += `
       <tr class="hover:bg-gray-800/60 transition-colors group">
-        <td class="px-4 py-3.5 font-mono text-gray-500 text-[11px]">${row.horaCargo || '--'}</td>
+        <td class="px-4 py-3.5 font-mono text-gray-400 text-[11px] cursor-pointer hover:bg-blue-900/30 hover:text-blue-300 transition-colors celda-trazabilidad border-l-2 border-transparent hover:border-blue-500" onclick="abrirTrazabilidad(event, '${row.idDetalle}')">
+          <div class="flex items-center gap-1.5" title="Click para ver auditoría">
+            <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            ${row.horaCargo || '--'}
+          </div>
+        </td>
         <td class="px-4 py-3.5 font-mono text-blue-400 font-bold tracking-tight">${row.idCargo || '--'}</td>
         <td class="px-4 py-3.5 truncate max-w-[150px] font-medium text-gray-200" title="${row.choferName}">${row.choferName}</td>
         <td class="px-4 py-3.5 truncate max-w-[200px]" title="${row.materialName}">${row.materialName}</td>
@@ -1395,3 +1402,90 @@ function renderizarHistorico() {
   html += `</tbody></table></div>`;
   grid.innerHTML = html;
 }
+
+// ==========================================
+// MINIMODAL FLOTANTE DE TRAZABILIDAD (TRACK & TRACE)
+// ==========================================
+window.abrirTrazabilidad = function(e, idDetalle) {
+    const row = AppState.historialFiltrado.find(r => r.idDetalle === idDetalle);
+    if (!row) return;
+
+    let globo = document.getElementById('globo-trazabilidad');
+    if (!globo) {
+        // Creamos el contenedor del globo dinámicamente la primera vez
+        globo = document.createElement('div');
+        globo.id = 'globo-trazabilidad';
+        globo.className = 'absolute z-[100] hidden bg-gray-900 rounded-xl shadow-2xl border border-gray-600 p-4 w-80 text-left transform transition-opacity opacity-0';
+        globo.innerHTML = `
+            <div id="trazabilidad-contenido" class="space-y-3"></div>
+            <div id="trazabilidad-flecha" class="absolute w-4 h-4 bg-gray-900 border-b border-r border-gray-600 rotate-45 transition-all"></div>
+        `;
+        document.body.appendChild(globo);
+
+        // Auto-cierre al hacer clic fuera
+        document.addEventListener('click', (ev) => {
+            if (!ev.target.closest('.celda-trazabilidad') && !globo.contains(ev.target)) {
+                globo.classList.add('hidden');
+                globo.classList.remove('opacity-100');
+            }
+        });
+    }
+
+    const contenido = document.getElementById('trazabilidad-contenido');
+    const flecha = document.getElementById('trazabilidad-flecha');
+
+    // Dibujamos las dos cajas (Salida y Devolución) con estilo Premium
+    contenido.innerHTML = `
+        <div class="bg-blue-900/20 border border-blue-500/30 p-3 rounded-lg shadow-inner">
+          <p class="text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
+            1. Despacho / Emisión
+          </p>
+          <p class="text-xs text-gray-200 mb-1"><span class="text-gray-500 mr-1">Gestor:</span> ${row.gestorCargo || 'No registrado'}</p>
+          <p class="text-xs text-gray-200 mb-2"><span class="text-gray-500 mr-1">Ruta:</span> <span class="font-bold text-gray-100">${row.emisorName}</span> ➔ <span class="font-bold text-gray-100">${row.destinoName}</span></p>
+          <p class="text-[10px] text-blue-300 font-mono bg-blue-900/40 px-2 py-0.5 rounded w-fit">${row.horaCargo || '--'}</p>
+        </div>
+        
+        <div class="bg-emerald-900/20 border border-emerald-500/30 p-3 rounded-lg shadow-inner">
+          <p class="text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+            2. Descargo / Devolución
+          </p>
+          ${row.horaDescargo ? `
+             <p class="text-xs text-gray-200 mb-2"><span class="text-gray-500 mr-1">Receptor:</span> ${row.gestorDescargo || 'No registrado'}</p>
+             <p class="text-[10px] text-emerald-300 font-mono bg-emerald-900/40 px-2 py-0.5 rounded w-fit">${row.horaDescargo}</p>
+          ` : `
+             <p class="text-xs text-gray-500 italic mt-1 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Bandejas aún en ruta...</p>
+          `}
+        </div>
+    `;
+
+    // Lógica de Posicionamiento Inteligente (Para que no se salga de la pantalla)
+    globo.classList.remove('hidden');
+    globo.classList.remove('opacity-100');
+
+    const rect = e.currentTarget.getBoundingClientRect(); 
+    const globoRect = globo.getBoundingClientRect();
+    
+    let top = rect.top + window.scrollY - globoRect.height - 10;
+    let left = rect.left + window.scrollX + (rect.width / 2) - (globoRect.width / 2);
+
+    // Flecha apuntando abajo (Globo arriba)
+    flecha.className = "absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-gray-900 border-b border-r border-gray-600 rotate-45 transition-all";
+
+    // Si el globo choca con el techo de la ventana, lo volteamos para que aparezca abajo
+    if (top < window.scrollY + 10) {
+        top = rect.bottom + window.scrollY + 10;
+        flecha.className = "absolute -top-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-gray-900 border-t border-l border-gray-600 rotate-45 transition-all";
+    }
+
+    // Prevenir desbordamiento horizontal
+    if (left < 10) left = 10;
+    if (left + globoRect.width > window.innerWidth - 10) left = window.innerWidth - globoRect.width - 10;
+
+    globo.style.top = top + 'px';
+    globo.style.left = left + 'px';
+    
+    // Animación de Fade-in
+    setTimeout(() => globo.classList.add('opacity-100'), 10);
+};
