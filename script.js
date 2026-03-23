@@ -550,6 +550,7 @@ async function handleFormSubmit(e) {
 
   const payload = {
     action: "saveCargo",
+    token: API_SECRET_TOKEN,
     data: {
       chofer,
       vehiculo,
@@ -997,6 +998,7 @@ async function procesarLiquidacionModal(btnElement, idCargo) {
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "updateDevolucion",
+        token: API_SECRET_TOKEN,
         data: payloadDevolucion,
         gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido' 
       })
