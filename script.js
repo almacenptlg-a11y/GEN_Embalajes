@@ -1,13 +1,12 @@
 /**
  * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics)
- * @security Protocolo Zero-Trust | Iframe Enforcer | Token Auth
+ * @security Protocolo Zero-Trust | Iframe Enforcer | Token Auth | Dual Theme
  */
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-QJ6RZdmQw3gJIt80Y6f4iTKyS7BqhXrgHTGWrO0PiSj4m/exec";
-const API_SECRET_TOKEN = "GEN_EMB_2026_SECURE_KEY"; // <-- NUEVO: Llave de seguridad API
+const API_SECRET_TOKEN = "GEN_EMB_2026_SECURE_KEY";
 
-// ⚠️ REEMPLAZA ESTO CON EL DOMINIO REAL DE TU HUB (Ej: "https://intranet.lagenovesa.com")
-const DOMINIO_HUB_PERMITIDO = "https://almacenptlg-a11y.github.io/GenApps/"; // Pon tu dominio aquí para máxima seguridad
+const DOMINIO_HUB_PERMITIDO = "https://almacenptlg-a11y.github.io"; // Cambia al dominio raíz de tu HUB
 
 const AppState = {
   user: null,               
@@ -26,7 +25,6 @@ const AppState = {
 // 1. SEGURIDAD: IFRAME ENFORCER (Anti-Bypass)
 // ==========================================
 if (window === window.top) {
-    // Si la página se abre fuera de un Iframe, DESTRUIMOS el contenido instantáneamente.
     document.documentElement.innerHTML = `
         <body style="background-color: #111827; color: #ef4444; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: sans-serif; text-align: center;">
             <div>
@@ -40,11 +38,10 @@ if (window === window.top) {
 }
 
 // ==========================================
-// 2. SEGURIDAD: GESTIÓN DE SESIÓN (INTEGRACIÓN HUB)
+// 2. SEGURIDAD Y GESTIÓN DE TEMA (INTEGRACIÓN HUB)
 // ==========================================
 window.addEventListener('message', (event) => {
-    // VALIDACIÓN DE ORIGEN (CORS Front)
-    if (DOMINIO_HUB_PERMITIDO !== "*" && event.origin !== DOMINIO_HUB_PERMITIDO) {
+    if (DOMINIO_HUB_PERMITIDO !== "*" && !event.origin.startsWith(DOMINIO_HUB_PERMITIDO)) {
         console.warn("Bloqueo de seguridad: Origen no reconocido.", event.origin);
         return; 
     }
@@ -63,7 +60,6 @@ window.addEventListener('message', (event) => {
         
         actualizarUIUsuario();
         
-        // 🔒 CARGA DIFERIDA: Solo cuando sabemos quién es el usuario, descargamos la BD.
         if (AppState.datos.choferes.length === 0) {
             initApp();
         }
@@ -71,7 +67,6 @@ window.addEventListener('message', (event) => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Avisamos al HUB Padre que el módulo está listo para recibir la llave
     window.parent.postMessage({ type: 'MODULO_LISTO' }, '*');
     
     setTimeout(() => {
@@ -79,7 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const statusDiv = document.getElementById('status-indicator');
             if(statusDiv) {
                 statusDiv.innerHTML = '<i class="text-red-500">⚠️</i> Acceso Restringido';
-                statusDiv.className = "flex items-center gap-2 text-sm text-red-400 bg-red-400/10 px-3 py-1.5 rounded-full border border-red-400/20 backdrop-blur-md";
+                statusDiv.className = "flex items-center gap-2 text-sm text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-400/10 px-3 py-1.5 rounded-full border border-red-200 dark:border-red-400/20 backdrop-blur-md";
             }
             const btnSubmit = document.getElementById('btnSubmit');
             if(btnSubmit) btnSubmit.disabled = true;
@@ -93,7 +88,7 @@ function actualizarUIUsuario() {
     const statusDiv = document.getElementById('status-indicator');
     if (statusDiv) {
         statusDiv.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 mr-1"></span> ${AppState.user.nombre} | ${AppState.user.area}`;
-        statusDiv.className = "flex items-center gap-2 text-sm text-emerald-400 bg-emerald-400/10 px-3 py-1.5 rounded-full border border-emerald-400/20 backdrop-blur-md";
+        statusDiv.className = "flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3 py-1.5 rounded-full border border-emerald-200 dark:border-emerald-400/20 backdrop-blur-md";
     }
 
     const btnSubmit = document.getElementById('btnSubmit');
@@ -101,11 +96,10 @@ function actualizarUIUsuario() {
 }
 
 // ==========================================
-// 3. INICIALIZACIÓN CON TOKEN API
+// 3. INICIALIZACIÓN
 // ==========================================
 async function initApp() {
   try {
-    // NUEVO: Enviamos el Token de Seguridad al Backend
     const res = await fetch(`${API_URL}?action=getInitData&token=${API_SECRET_TOKEN}`, { method: "GET", redirect: "follow" });
     if (!res.ok) throw new Error(`Error de Servidor: Código ${res.status}`);
 
@@ -130,9 +124,9 @@ async function initApp() {
     const statusDiv = document.getElementById('status-indicator');
     if(statusDiv) {
         statusDiv.innerHTML = "Error Interno";
-        statusDiv.className = "flex items-center gap-2 text-sm text-red-400 bg-red-400/10 px-3 py-1.5 rounded-full border border-red-400/20 backdrop-blur-md";
+        statusDiv.className = "flex items-center gap-2 text-sm text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-400/10 px-3 py-1.5 rounded-full border border-red-200 dark:border-red-400/20 backdrop-blur-md";
     }
-    mostrarAlerta("No se pudo descargar la base de datos. " + err.message, "error", "Error Crítico");
+    mostrarAlerta("No se pudo descargar la BD. " + err.message, "error", "Error Crítico");
   }
 }
 
@@ -154,7 +148,7 @@ function initSignaturePad() {
     signatureCtx.lineCap = 'round';
     signatureCtx.lineJoin = 'round';
     signatureCtx.lineWidth = 3;
-    signatureCtx.strokeStyle = '#000000'; // Tinta negra
+    signatureCtx.strokeStyle = '#000000'; 
   }
   
   window.addEventListener('resize', resizeCanvas);
@@ -189,17 +183,14 @@ function initSignaturePad() {
     signatureCtx.closePath();
   };
 
-  // Eventos Mouse
   signaturePad.addEventListener('mousedown', startDrawing);
   signaturePad.addEventListener('mousemove', draw);
   signaturePad.addEventListener('mouseup', stopDrawing);
   signaturePad.addEventListener('mouseout', stopDrawing);
-  // Eventos Touch (Móviles)
   signaturePad.addEventListener('touchstart', startDrawing, { passive: false });
   signaturePad.addEventListener('touchmove', draw, { passive: false });
   signaturePad.addEventListener('touchend', stopDrawing);
 
-  // Limpiar Pizarra
   document.getElementById('btnClearSignature').addEventListener('click', limpiarFirma);
 }
 
@@ -209,7 +200,7 @@ function limpiarFirma() {
 }
 
 // ==========================================
-// SISTEMA DE ALERTAS PERSONALIZADO
+// SISTEMA DE ALERTAS DUAL-THEME
 // ==========================================
 function mostrarAlerta(mensaje, tipo = "warning", titulo = "") {
   const modal = document.getElementById("customAlert");
@@ -220,15 +211,18 @@ function mostrarAlerta(mensaje, tipo = "warning", titulo = "") {
   const btn = document.getElementById("btnAlertClose");
 
   msg.textContent = mensaje;
+  content.className = "bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl rounded-3xl w-[90%] max-w-sm p-8 transform scale-95 transition-transform duration-300 flex flex-col items-center text-center";
+  title.className = "text-xl font-black text-gray-900 dark:text-white mb-2 tracking-tight";
+  msg.className = "text-sm text-gray-600 dark:text-gray-300 mb-8 leading-relaxed";
 
   if (tipo === "warning" || tipo === "error") {
-    icon.innerHTML = `<div class="w-20 h-20 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 border-4 border-red-500/20"><svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg></div>`;
+    icon.innerHTML = `<div class="w-20 h-20 rounded-full bg-red-50 dark:bg-red-500/10 flex items-center justify-center text-red-600 dark:text-red-500 border-4 border-red-200 dark:border-red-500/20"><svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg></div>`;
     title.textContent = titulo || "Dato Requerido";
-    btn.className = "w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-red-900/40 ring-red-500/50";
+    btn.className = "w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold transition-all shadow-lg focus:outline-none focus:ring-4 shadow-red-600/30 dark:shadow-red-900/40";
   } else if (tipo === "success") {
-    icon.innerHTML = `<div class="w-20 h-20 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400 border-4 border-emerald-500/20"><svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div>`;
+    icon.innerHTML = `<div class="w-20 h-20 rounded-full bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400 border-4 border-emerald-200 dark:border-emerald-500/20"><svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div>`;
     title.textContent = titulo || "¡Operación Exitosa!";
-    btn.className = "w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/40 ring-emerald-500/50";
+    btn.className = "w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg focus:outline-none focus:ring-4 shadow-emerald-600/30 dark:shadow-emerald-900/40";
   }
 
   modal.classList.remove("hidden");
@@ -248,47 +242,8 @@ window.cerrarAlerta = function () {
 };
 
 // ==========================================
-// INICIALIZACIÓN
+// AUTOCOMPLETADO DUAL-THEME
 // ==========================================
-document.addEventListener("DOMContentLoaded", initApp);
-
-async function initApp() {
-  try {
-    const res = await fetch(`${API_URL}?action=getInitData`, { method: "GET", redirect: "follow" });
-    if (!res.ok) throw new Error(`Error de Servidor: Código ${res.status}`);
-
-    const json = await res.json();
-    if (json.status === "error") throw new Error(`El servidor devolvió: ${json.message}`);
-
-    AppState.datos = json.data;
-
-    // Filtramos áreas dinámicamente
-    AppState.datos.areas = AppState.datos.destinos.filter((destino) => {
-      return destino.EMISOR && String(destino.EMISOR).trim().toUpperCase() === "SI";
-    });
-
-    // Fusión de Placa y Marca
-    AppState.datos.vehiculos = AppState.datos.vehiculos.map(v => {
-      v.DISPLAY_NAME = `${v.PLACA} ${v.MARCA || ''}`.trim();
-      return v;
-    });
-
-    construirUI();
-    initSignaturePad();
-    actualizarStatus("Conectado y Listo", "emerald");
-  } catch (err) {
-    actualizarStatus("Error Interno", "red");
-    const panelError = document.getElementById("emptyState");
-    if (panelError) {
-      panelError.innerHTML = `
-        <div class="text-red-400 font-bold mb-2">🚨 SE DETECTÓ UN ERROR 🚨</div>
-        <div class="text-gray-300 text-xs text-left bg-gray-900 p-3 rounded-lg border border-red-500/50 font-mono">${err.message}</div>
-      `;
-      panelError.style.display = "block";
-    }
-  }
-}
-
 function construirUI() {
   setupAutocomplete("inArea", "hdArea", "listArea", AppState.datos.areas, "REFERENCIA", "ID_DSTN", "inChofer");
   setupAutocomplete("inChofer", "hdChofer", "listChofer", AppState.datos.choferes, "NOMBRE", "ID_CHFR", "inVehiculo");
@@ -333,24 +288,19 @@ function setupAutocomplete(inputId, hiddenId, listId, dataArray, displayField, v
     currentFocus = -1;
     hidden.value = "";
 
-    if (!val) {
-      list.classList.add("hidden");
-      return;
-    }
+    if (!val) { list.classList.add("hidden"); return; }
 
     const matches = dataArray.filter((item) => {
       const text = item[displayField] ? String(item[displayField]).toLowerCase() : "";
       return text.includes(val);
     });
 
-    if (matches.length === 0) {
-      list.classList.add("hidden");
-      return;
-    }
+    if (matches.length === 0) { list.classList.add("hidden"); return; }
 
     matches.forEach((item) => {
       const li = document.createElement("li");
-      li.className = "px-4 py-2 text-gray-200 cursor-pointer text-sm border-b border-gray-700 last:border-0 transition-colors hover:bg-blue-600 hover:text-white";
+      // ESTILOS DUALES APLICADOS
+      li.className = "px-4 py-2 text-gray-700 dark:text-gray-200 cursor-pointer text-sm border-b border-gray-200 dark:border-gray-700 last:border-0 transition-colors hover:bg-blue-50 dark:hover:bg-blue-600 hover:text-blue-700 dark:hover:text-white";
       li.textContent = item[displayField];
 
       const selectAction = () => {
@@ -361,15 +311,10 @@ function setupAutocomplete(inputId, hiddenId, listId, dataArray, displayField, v
         if (nextInputId) document.getElementById(nextInputId).focus();
       };
 
-      li.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        selectAction();
-      });
-
+      li.addEventListener("mousedown", (e) => { e.preventDefault(); selectAction(); });
       li._selectTrigger = selectAction;
       list.appendChild(li);
     });
-
     list.classList.remove("hidden");
   });
 
@@ -377,13 +322,9 @@ function setupAutocomplete(inputId, hiddenId, listId, dataArray, displayField, v
     const items = list.getElementsByTagName("li");
     if (list.classList.contains("hidden") || items.length === 0) return;
 
-    if (e.key === "ArrowDown") {
-      currentFocus++;
-      addActive(items);
-    } else if (e.key === "ArrowUp") {
-      currentFocus--;
-      addActive(items);
-    } else if (e.key === "Enter" || e.key === "Tab") {
+    if (e.key === "ArrowDown") { currentFocus++; addActive(items); } 
+    else if (e.key === "ArrowUp") { currentFocus--; addActive(items); } 
+    else if (e.key === "Enter" || e.key === "Tab") {
       e.preventDefault();
       if (currentFocus > -1) items[currentFocus]._selectTrigger();
       else items[0]._selectTrigger();
@@ -392,10 +333,7 @@ function setupAutocomplete(inputId, hiddenId, listId, dataArray, displayField, v
 
   input.addEventListener("blur", () => {
     setTimeout(() => {
-      if (!hidden.value) {
-        input.value = "";
-        list.classList.add("hidden");
-      }
+      if (!hidden.value) { input.value = ""; list.classList.add("hidden"); }
     }, 150);
   });
 
@@ -404,17 +342,19 @@ function setupAutocomplete(inputId, hiddenId, listId, dataArray, displayField, v
     removeActive(items);
     if (currentFocus >= items.length) currentFocus = 0;
     if (currentFocus < 0) currentFocus = items.length - 1;
-    items[currentFocus].classList.add("bg-blue-600", "text-white");
-    items[currentFocus].scrollIntoView({ behavior: "smooth", block: "nearest" });
+    // ESTILOS DUALES ACTIVOS
+    items[currentFocus].classList.add("bg-blue-100", "dark:bg-blue-600", "text-blue-900", "dark:text-white");
   }
 
   function removeActive(items) {
-    for (let i = 0; i < items.length; i++) items[i].classList.remove("bg-blue-600", "text-white");
+    for (let i = 0; i < items.length; i++) {
+        items[i].classList.remove("bg-blue-100", "dark:bg-blue-600", "text-blue-900", "dark:text-white");
+    }
   }
 }
 
 // ==========================================
-// MÓDULO EMISIÓN DE CARGOS
+// MÓDULO EMISIÓN DE CARGOS DUAL-THEME
 // ==========================================
 function agregarItemLista() {
   const destinoId = document.getElementById("hdDestino").value;
@@ -423,28 +363,19 @@ function agregarItemLista() {
   const materialText = document.getElementById("inMaterial").value;
   const cantidad = parseInt(document.getElementById("inCantidad").value);
 
-  if (!destinoId) return mostrarAlerta("Por favor, selecciona un DESTINO válido de la lista desplegable.", "warning", "Falta Destino");
-  if (!materialId) return mostrarAlerta("Debes especificar el TIPO DE MATERIAL de la lista desplegable.", "warning", "Falta Material");
-  if (isNaN(cantidad) || cantidad <= 0) return mostrarAlerta("Ingresa una CANTIDAD numérica mayor a cero (0).", "warning", "Cantidad Inválida");
+  if (!destinoId) return mostrarAlerta("Selecciona un DESTINO válido.", "warning", "Falta Destino");
+  if (!materialId) return mostrarAlerta("Especifica el TIPO DE MATERIAL.", "warning", "Falta Material");
+  if (isNaN(cantidad) || cantidad <= 0) return mostrarAlerta("Ingresa CANTIDAD mayor a cero.", "warning", "Cantidad Inválida");
 
   const materialObj = AppState.datos.materiales.find((m) => m.ID_MEMB === materialId);
   const m3Unitario = materialObj && materialObj.M3 ? parseFloat(String(materialObj.M3).replace(",", ".")) : 0;
-  const m3TotalLinea = m3Unitario * cantidad;
-
+  
   AppState.cargoItems.push({
-    destinoId,
-    destinoName: destinoText,
-    materialId,
-    materialName: materialText,
-    cantidad,
-    m3Unitario,
-    m3Total: m3TotalLinea
+    destinoId, destinoName: destinoText, materialId, materialName: materialText,
+    cantidad, m3Unitario, m3Total: m3Unitario * cantidad
   });
 
-  document.getElementById("hdMaterial").value = "";
-  document.getElementById("inMaterial").value = "";
-  document.getElementById("inCantidad").value = "";
-
+  document.getElementById("hdMaterial").value = ""; document.getElementById("inMaterial").value = ""; document.getElementById("inCantidad").value = "";
   renderizarListaItems();
 }
 
@@ -475,21 +406,21 @@ function renderizarListaItems() {
     conteoTipos[item.materialName] = (conteoTipos[item.materialName] || 0) + item.cantidad;
 
     const row = `
-      <div class="flex items-center justify-between bg-gray-800/80 p-3 rounded-xl border border-gray-600 gap-2 overflow-hidden">
+      <div class="flex items-center justify-between bg-white dark:bg-gray-800/80 p-3 rounded-xl border border-gray-200 dark:border-gray-600 gap-2 shadow-sm">
         <div class="flex items-center gap-3 flex-1 min-w-0">
-          <span class="bg-blue-900 text-blue-300 font-bold w-6 h-6 flex items-center justify-center rounded-md text-xs shrink-0">${idx + 1}</span>
+          <span class="bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-bold w-6 h-6 flex items-center justify-center rounded-md text-xs shrink-0">${idx + 1}</span>
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-semibold text-white truncate" title="${item.materialName}">${item.materialName}</p>
-            <div class="flex items-center gap-2 text-xs text-gray-400 truncate">
-              <span title="${item.destinoName}">A: <span class="text-gray-300">${item.destinoName}</span></span>
-              <span class="text-gray-600">|</span>
-              <span class="text-emerald-400 font-mono" title="Cubicaje">${item.m3Total.toFixed(3)} m³</span>
+            <p class="text-sm font-semibold text-gray-800 dark:text-white truncate" title="${item.materialName}">${item.materialName}</p>
+            <div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 truncate">
+              <span title="${item.destinoName}">A: <span class="text-gray-700 dark:text-gray-300">${item.destinoName}</span></span>
+              <span class="text-gray-300 dark:text-gray-600">|</span>
+              <span class="text-emerald-600 dark:text-emerald-400 font-mono" title="Cubicaje">${item.m3Total.toFixed(3)} m³</span>
             </div>
           </div>
         </div>
         <div class="flex items-center gap-2 md:gap-3 shrink-0">
-          <span class="bg-gray-900 px-2 py-1 md:px-3 md:py-1 rounded-lg text-xs md:text-sm text-gray-200 border border-gray-700 whitespace-nowrap">${item.cantidad} und.</span>
-          <button type="button" onclick="removerItemLista(${idx})" class="text-red-400 hover:text-red-300 p-1 shrink-0 transition-colors">
+          <span class="bg-gray-100 dark:bg-gray-900 px-2 py-1 md:px-3 md:py-1 rounded-lg text-xs md:text-sm text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 whitespace-nowrap">${item.cantidad} und.</span>
+          <button type="button" onclick="removerItemLista(${idx})" class="text-red-400 hover:text-red-600 dark:hover:text-red-300 p-1 shrink-0 transition-colors">
             <svg class="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
           </button>
         </div>
@@ -499,11 +430,10 @@ function renderizarListaItems() {
 
   displayTotalM3.textContent = sumatoriaM3.toFixed(3);
 
-  const tiposKeys = Object.keys(conteoTipos);
-  boxResumen.innerHTML = tiposKeys.map((tipo) => `
-    <div class="flex justify-between items-center text-sm border-b border-gray-700/50 last:border-0 pb-1 mb-1 last:pb-0 last:mb-0">
-      <span class="text-gray-300 truncate pr-3" title="${tipo}">${tipo}</span>
-      <span class="text-emerald-400 font-bold bg-emerald-900/30 px-2 rounded">${conteoTipos[tipo]}</span>
+  boxResumen.innerHTML = Object.keys(conteoTipos).map((tipo) => `
+    <div class="flex justify-between items-center text-sm border-b border-gray-200 dark:border-gray-700/50 last:border-0 pb-1 mb-1 last:pb-0 last:mb-0">
+      <span class="text-gray-600 dark:text-gray-300 truncate pr-3" title="${tipo}">${tipo}</span>
+      <span class="text-emerald-700 dark:text-emerald-400 font-bold bg-emerald-100 dark:bg-emerald-900/30 px-2 rounded">${conteoTipos[tipo]}</span>
     </div>
   `).join("");
 }
@@ -520,27 +450,26 @@ async function handleFormSubmit(e) {
   const vehiculo = document.getElementById("hdVehiculo").value;
   const area = document.getElementById("hdArea").value || document.getElementById("inArea").value.trim();
 
-  // VALIDACIONES
-  if (!area) return mostrarAlerta("Es obligatorio especificar el ÁREA RESPONSABLE que emite el cargo.", "error", "Falta Área");
-  if (!chofer) return mostrarAlerta("Es obligatorio seleccionar un CHOFER para emitir el cargo.", "error", "Falta Chofer");
-  if (!vehiculo) return mostrarAlerta("Es obligatorio seleccionar la PLACA del vehículo.", "error", "Falta Vehículo");
-  if (AppState.cargoItems.length === 0) return mostrarAlerta("Debes añadir al menos un MATERIAL a la lista de viaje antes de emitir el cargo.", "error", "Lista de Viaje Vacía");
-// NUEVA VALIDACIÓN: LA FIRMA
-  if (isSignatureEmpty) return mostrarAlerta("El chofer debe firmar la conformidad del cargo.", "error", "Firma Requerida");
+  if (!area) return mostrarAlerta("Es obligatorio especificar el ÁREA RESPONSABLE.", "error", "Falta Área");
+  if (!chofer) return mostrarAlerta("Es obligatorio seleccionar un CHOFER.", "error", "Falta Chofer");
+  if (!vehiculo) return mostrarAlerta("Es obligatorio seleccionar la PLACA.", "error", "Falta Vehículo");
+  if (AppState.cargoItems.length === 0) return mostrarAlerta("Añade al menos un MATERIAL a la lista.", "error", "Lista Vacía");
+  if (isSignatureEmpty) return mostrarAlerta("El chofer debe firmar la conformidad.", "error", "Firma Requerida");
 
-  // Capturamos la firma como imagen en código (Base64)
   const firmaImagen = signaturePad.toDataURL("image/png");
-  // TRUCO ANTI-POPUP BLOCKER: Abrimos la pestaña antes de consultar al servidor
+  
+  // Loader DUAL-THEME en la ventana de impresión
   const printTab = window.open("", "_blank");
   printTab.document.write(`
     <style>
-      body { background-color: #111827; color: #f3f4f6; font-family: system-ui, sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-      .spinner { border: 4px solid rgba(255,255,255,0.1); width: 45px; height: 45px; border-radius: 50%; border-left-color: #3b82f6; animation: spin 1s linear infinite; margin-bottom: 1.5rem; }
+      body { background-color: #f9fafb; color: #111827; font-family: system-ui, sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+      @media (prefers-color-scheme: dark) { body { background-color: #111827; color: #f3f4f6; } }
+      .spinner { border: 4px solid rgba(156,163,175,0.2); width: 45px; height: 45px; border-radius: 50%; border-left-color: #3b82f6; animation: spin 1s linear infinite; margin-bottom: 1.5rem; }
       @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
     <div class="spinner"></div>
     <h2 style="margin:0 0 0.5rem 0;">Emitiendo Cargo Oficial...</h2>
-    <p style="color:#9ca3af; font-size: 0.875rem;">Conectando con el servidor. No cierre esta pestaña.</p>
+    <p style="color:#6b7280; font-size: 0.875rem;">Conectando con el servidor. No cierre esta pestaña.</p>
   `);
 
   const btn = document.getElementById("btnSubmit");
@@ -552,38 +481,23 @@ async function handleFormSubmit(e) {
     action: "saveCargo",
     token: API_SECRET_TOKEN,
     data: {
-      chofer,
-      vehiculo,
-      area,
-      firma: firmaImagen,
+      chofer, vehiculo, area, firma: firmaImagen,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
       gestorCorreo: AppState.user ? AppState.user.usuario : 'almacenpt@lagenovesa.com.pe',
       materiales: AppState.cargoItems.map((i) => ({
-        id_memb: i.materialId,
-        materialName: i.materialName,
-        cantidad: i.cantidad,
-        destino: i.destinoId
+        id_memb: i.materialId, materialName: i.materialName, cantidad: i.cantidad, destino: i.destinoId
       }))
     }
   };
 
   try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      redirect: "follow",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload)
-    });
-
+    const res = await fetch(API_URL, { method: "POST", redirect: "follow", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
     const result = await res.json();
+    
     if (result.status === "success") {
       const idGenerado = result.data.idCargo;
-      
-
-      // 1. CONSTRUIR CARGO TEMPORAL (Para imprimir instantáneamente sin hacer otro fetch)
       const choferCat = AppState.datos.choferes.find(c => c.ID_CHFR === chofer);
       const vehiculoCat = AppState.datos.vehiculos.find(v => v.PLACA === vehiculo);
-      
       const ahora = new Date();
       const fechaFormat = `${ahora.getDate().toString().padStart(2, '0')}/${(ahora.getMonth()+1).toString().padStart(2, '0')}/${ahora.getFullYear()} ${ahora.getHours().toString().padStart(2, '0')}:${ahora.getMinutes().toString().padStart(2, '0')}:${ahora.getSeconds().toString().padStart(2, '0')}`;
 
@@ -593,64 +507,47 @@ async function handleFormSubmit(e) {
         placa: vehiculoCat ? vehiculoCat.DISPLAY_NAME : vehiculo,
         hora: fechaFormat,
         firmaCargo: firmaImagen,
-        detalles: AppState.cargoItems.map(i => ({
-          LLEVA: i.cantidad,
-          DESTINO: i.destinoId,
-          MATERIAL: i.materialId,
-          AREA: area
-        }))
+        detalles: AppState.cargoItems.map(i => ({ LLEVA: i.cantidad, DESTINO: i.destinoId, MATERIAL: i.materialId, AREA: area }))
       });
 
-      // 2. LANZAR LA IMPRESIÓN A LA PESTAÑA ABIERTA
       generarDocumentoImpresion(idGenerado, printTab);
-
-      // 3. LIMPIAR INTERFAZ
       mostrarAlerta(`El viaje ha sido registrado con el ID: ${idGenerado}`, "success", "¡Cargo Emitido!");
       document.getElementById("cargoForm").reset();
       ["hdArea", "hdChofer", "hdVehiculo", "hdDestino", "hdMaterial"].forEach((id) => (document.getElementById(id).value = ""));
       AppState.cargoItems = [];
       renderizarListaItems();
       limpiarFirma();
-
     } else {
-      if(printTab && !printTab.closed) printTab.close(); // Si falla, cerramos la pestaña
+      if(printTab && !printTab.closed) printTab.close(); 
       throw new Error(result.message);
     }
   } catch (err) {
-    if(printTab && !printTab.closed) printTab.close(); // Si falla, cerramos la pestaña
+    if(printTab && !printTab.closed) printTab.close();
     mostrarAlerta("Error del servidor: " + err.message, "error", "Fallo de Emisión");
   } finally {
-    btn.innerHTML = txt;
-    btn.disabled = false;
+    btn.innerHTML = txt; btn.disabled = false;
   }
 }
 
-function actualizarStatus(t, c) {
-  document.getElementById("status-indicator").innerHTML = `<span class="relative flex h-2 w-2 mr-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-${c}-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-${c}-500"></span></span>${t}`;
-}
-
 // ==========================================
-// MÓDULO DE DESCARGOS Y DASHBOARD
+// MÓDULO DE DESCARGOS DUAL-THEME
 // ==========================================
-// CONTROL DE PESTAÑAS
 document.getElementById("tabEmitir").addEventListener("click", () => {
   document.getElementById("viewEmitir").classList.remove("hidden");
   document.getElementById("viewDescargo").classList.add("hidden");
   document.getElementById("viewHistorico").classList.add("hidden");
-  
   document.getElementById("tabEmitir").className = "px-5 py-2 bg-blue-600 rounded-xl text-sm font-bold text-white shadow-lg transition-all";
-  document.getElementById("tabDescargo").className = "px-5 py-2 hover:bg-gray-700 rounded-xl text-sm font-bold text-gray-400 transition-all";
-  document.getElementById("tabHistorico").className = "px-5 py-2 hover:bg-gray-700 rounded-xl text-sm font-bold text-gray-400 transition-all";
+  document.getElementById("tabDescargo").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
+  document.getElementById("tabHistorico").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
 });
 
 document.getElementById("tabDescargo").addEventListener("click", () => {
   document.getElementById("viewDescargo").classList.remove("hidden");
   document.getElementById("viewEmitir").classList.add("hidden");
   document.getElementById("viewHistorico").classList.add("hidden");
-  
   document.getElementById("tabDescargo").className = "px-5 py-2 bg-emerald-600 rounded-xl text-sm font-bold text-white shadow-lg transition-all";
-  document.getElementById("tabEmitir").className = "px-5 py-2 hover:bg-gray-700 rounded-xl text-sm font-bold text-gray-400 transition-all";
-  document.getElementById("tabHistorico").className = "px-5 py-2 hover:bg-gray-700 rounded-xl text-sm font-bold text-gray-400 transition-all";
+  document.getElementById("tabEmitir").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
+  document.getElementById("tabHistorico").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
   cargarViajesPendientes();
 });
 
@@ -658,10 +555,9 @@ document.getElementById("tabHistorico").addEventListener("click", () => {
   document.getElementById("viewHistorico").classList.remove("hidden");
   document.getElementById("viewEmitir").classList.add("hidden");
   document.getElementById("viewDescargo").classList.add("hidden");
-  
   document.getElementById("tabHistorico").className = "px-5 py-2 bg-blue-600 rounded-xl text-sm font-bold text-white shadow-lg transition-all";
-  document.getElementById("tabEmitir").className = "px-5 py-2 hover:bg-gray-700 rounded-xl text-sm font-bold text-gray-400 transition-all";
-  document.getElementById("tabDescargo").className = "px-5 py-2 hover:bg-gray-700 rounded-xl text-sm font-bold text-gray-400 transition-all";
+  document.getElementById("tabEmitir").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
+  document.getElementById("tabDescargo").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
   cargarHistorico();
 });
 
@@ -671,10 +567,10 @@ document.getElementById("selFiltroColumna").addEventListener("change", renderiza
 
 async function cargarViajesPendientes() {
   const grid = document.getElementById("gridCargos");
-  grid.innerHTML = `<div class="text-center text-emerald-400 py-8 animate-pulse font-bold">Consultando base de datos...</div>`;
+  grid.innerHTML = `<div class="text-center text-emerald-600 dark:text-emerald-400 py-8 animate-pulse font-bold">Consultando base de datos...</div>`;
 
   try {
-    const res = await fetch(`${API_URL}?action=getActiveCargos`, { method: "GET", redirect: "follow" });
+    const res = await fetch(`${API_URL}?action=getActiveCargos&token=${API_SECRET_TOKEN}`, { method: "GET", redirect: "follow" });
     const json = await res.json();
     if (json.status !== "success") throw new Error(json.message);
 
@@ -682,39 +578,28 @@ async function cargarViajesPendientes() {
       cargo._horaSort = estandarizarFecha(cargo.hora);
       return cargo;
     });
-
     renderizarCargosFiltrados();
   } catch (err) {
-    grid.innerHTML = `<div class="text-center text-red-500 py-8 border border-red-500/50 rounded-xl bg-red-500/10">Error: ${err.message}</div>`;
+    grid.innerHTML = `<div class="text-center text-red-600 dark:text-red-500 py-8 border border-red-200 dark:border-red-500/50 rounded-xl bg-red-50 dark:bg-red-500/10">Error: ${err.message}</div>`;
   }
 }
 
 window.setSort = function (key) {
-  if (AppState.sortConfig.key === key) {
-    AppState.sortConfig.asc = !AppState.sortConfig.asc;
-  } else {
-    AppState.sortConfig.key = key;
-    AppState.sortConfig.asc = true;
-  }
+  if (AppState.sortConfig.key === key) AppState.sortConfig.asc = !AppState.sortConfig.asc;
+  else { AppState.sortConfig.key = key; AppState.sortConfig.asc = true; }
   renderizarCargosFiltrados();
 };
 
 function getSortIcon(key) {
-  if (AppState.sortConfig.key !== key) return `<span class="text-gray-600 ml-1">↕</span>`;
-  return AppState.sortConfig.asc ? `<span class="text-emerald-400 ml-1">↑</span>` : `<span class="text-emerald-400 ml-1">↓</span>`;
+  if (AppState.sortConfig.key !== key) return `<span class="text-gray-400 dark:text-gray-600 ml-1">↕</span>`;
+  return AppState.sortConfig.asc ? `<span class="text-emerald-600 dark:text-emerald-400 ml-1">↑</span>` : `<span class="text-emerald-600 dark:text-emerald-400 ml-1">↓</span>`;
 }
 
 function estandarizarFecha(fechaLatina) {
   if (!fechaLatina) return "0000-00-00 00:00:00";
   const partes = String(fechaLatina).split(/[ \/:-]+/);
   if (partes.length >= 3) {
-    const d = partes[0].padStart(2, "0");
-    const m = partes[1].padStart(2, "0");
-    const y = partes[2];
-    const hr = (partes[3] || "00").padStart(2, "0");
-    const min = (partes[4] || "00").padStart(2, "0");
-    const sec = (partes[5] || "00").padStart(2, "0");
-    return `${y}-${m}-${d} ${hr}:${min}:${sec}`;
+    return `${partes[2]}-${partes[1].padStart(2, "0")}-${partes[0].padStart(2, "0")} ${(partes[3] || "00").padStart(2, "0")}:${(partes[4] || "00").padStart(2, "0")}:${(partes[5] || "00").padStart(2, "0")}`;
   }
   return String(fechaLatina);
 }
@@ -733,7 +618,6 @@ function renderizarCargosFiltrados() {
       if (filtroColumna === "placa") return valPlaca.includes(searchTerm);
       if (filtroColumna === "choferNombre") return valChofer.includes(searchTerm);
       if (filtroColumna === "idCargo") return valId.includes(searchTerm);
-
       return valPlaca.includes(searchTerm) || valChofer.includes(searchTerm) || valId.includes(searchTerm);
     });
   }
@@ -743,7 +627,6 @@ function renderizarCargosFiltrados() {
     const sortKey = key === "hora" || key === "fecha" ? "_horaSort" : key;
     let valA = String(a[sortKey] || "").toLowerCase();
     let valB = String(b[sortKey] || "").toLowerCase();
-
     if (valA < valB) return asc ? -1 : 1;
     if (valA > valB) return asc ? 1 : -1;
     return 0;
@@ -756,58 +639,56 @@ function renderizarTablaUI(cargos) {
   const grid = document.getElementById("gridCargos");
 
   if (!cargos || cargos.length === 0) {
-    grid.innerHTML = `<div class="text-center text-gray-400 py-8 font-bold bg-gray-800/40 rounded-2xl border border-gray-700/50">No se encontraron viajes pendientes.</div>`;
+    grid.innerHTML = `<div class="text-center text-gray-500 dark:text-gray-400 py-8 font-bold bg-white dark:bg-gray-800/40 rounded-2xl border border-gray-200 dark:border-gray-700/50">No se encontraron viajes pendientes.</div>`;
     return;
   }
 
   let html = `
-    <div class="overflow-x-auto rounded-xl border border-gray-700/80 shadow-inner">
-      <table class="w-full text-left text-sm text-gray-300 whitespace-nowrap">
-        <thead class="bg-gray-900/80 text-xs uppercase text-gray-400 select-none border-b border-gray-700">
+    <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700/80 shadow-sm dark:shadow-inner">
+      <table class="w-full text-left text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+        <thead class="bg-gray-100 dark:bg-gray-900/80 text-xs uppercase text-gray-500 dark:text-gray-400 select-none border-b border-gray-200 dark:border-gray-700">
           <tr>
-            <th class="px-4 py-4 cursor-pointer hover:text-white transition-colors" onclick="setSort('idCargo')">ID Cargo ${getSortIcon("idCargo")}</th>
-            <th class="px-4 py-4 cursor-pointer hover:text-white transition-colors" onclick="setSort('placa')">Placa ${getSortIcon("placa")}</th>
-            <th class="px-4 py-4 cursor-pointer hover:text-white transition-colors" onclick="setSort('choferNombre')">Chofer ${getSortIcon("choferNombre")}</th>
-            <th class="px-4 py-4 cursor-pointer hover:text-white transition-colors" onclick="setSort('fecha')">Hora Salida ${getSortIcon("hora")}</th>
+            <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('idCargo')">ID Cargo ${getSortIcon("idCargo")}</th>
+            <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('placa')">Placa ${getSortIcon("placa")}</th>
+            <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('choferNombre')">Chofer ${getSortIcon("choferNombre")}</th>
+            <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('fecha')">Hora Salida ${getSortIcon("hora")}</th>
             <th class="px-4 py-4 text-center">Estado</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-800/60">
+        <tbody class="divide-y divide-gray-200 dark:divide-gray-800/60 bg-white dark:bg-transparent">
   `;
 
   cargos.forEach((cargo) => {
     let totalDeuda = 0;
-
     cargo.detalles.forEach((d) => {
       const lleva = parseInt(d.LLEVA || 0);
       const devuelve = parseInt(d.DEVUELVE || 0);
-      const deudaLinea = parseInt(d.DEUDA !== undefined && d.DEUDA !== "" ? d.DEUDA : lleva - devuelve);
-      totalDeuda += deudaLinea;
+      totalDeuda += parseInt(d.DEUDA !== undefined && d.DEUDA !== "" ? d.DEUDA : lleva - devuelve);
     });
 
     const horaSalida = cargo.hora || "--/--/---- --:--:--";
     let badgeEstadoHTML = "";
     
     if (totalDeuda > 0) {
-      badgeEstadoHTML = `<span class="bg-pink-600/20 text-pink-400 border border-pink-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 justify-center w-fit mx-auto shadow-[0_0_10px_rgba(219,39,119,0.1)]">
+      badgeEstadoHTML = `<span class="bg-pink-50 dark:bg-pink-600/20 text-pink-600 dark:text-pink-400 border border-pink-200 dark:border-pink-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 justify-center w-fit mx-auto shadow-sm dark:shadow-[0_0_10px_rgba(219,39,119,0.1)]">
         <span class="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse"></span>Debe ${totalDeuda}
       </span>`;
     } else if (totalDeuda < 0) {
-      badgeEstadoHTML = `<span class="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 justify-center w-fit mx-auto">
+      badgeEstadoHTML = `<span class="bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 justify-center w-fit mx-auto">
         Excedente: ${Math.abs(totalDeuda)}
       </span>`;
     } else {
-      badgeEstadoHTML = `<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center justify-center w-fit mx-auto">
+      badgeEstadoHTML = `<span class="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center justify-center w-fit mx-auto">
         Completado
       </span>`;
     }
 
     html += `
-      <tr class="hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${cargo.idCargo}')" title="Clic para ver detalles">
-        <td class="px-4 py-3 font-mono text-gray-400 text-xs">${cargo.idCargo}</td>
-        <td class="px-4 py-3"><span class="bg-blue-900/40 text-blue-300 border border-blue-800/50 px-2 py-1 rounded text-xs font-bold">${cargo.placa || "S/N"}</span></td>
-        <td class="px-4 py-3 font-bold text-gray-200 truncate max-w-[200px]">${cargo.choferNombre}</td>
-        <td class="px-4 py-3 text-emerald-400/80 font-mono text-xs tracking-wider">${horaSalida}</td>
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${cargo.idCargo}')" title="Clic para ver detalles">
+        <td class="px-4 py-3 font-mono text-gray-500 dark:text-gray-400 text-xs">${cargo.idCargo}</td>
+        <td class="px-4 py-3"><span class="bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 px-2 py-1 rounded text-xs font-bold">${cargo.placa || "S/N"}</span></td>
+        <td class="px-4 py-3 font-bold text-gray-800 dark:text-gray-200 truncate max-w-[200px]">${cargo.choferNombre}</td>
+        <td class="px-4 py-3 text-emerald-600 dark:text-emerald-400/80 font-mono text-xs tracking-wider">${horaSalida}</td>
         <td class="px-4 py-3 text-center align-middle">${badgeEstadoHTML}</td>
       </tr>
     `;
@@ -818,51 +699,34 @@ function renderizarTablaUI(cargos) {
 }
 
 // ==========================================
-// CONTROLADOR DEL MODAL DETALLE Y LIQUIDACIÓN
+// MODAL DETALLE Y LIQUIDACIÓN DUAL-THEME
 // ==========================================
 function abrirDetalle(idCargo) {
   const cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
   if (!cargo) return;
 
-  let totalMaterialesLlevados = 0;
-  let totalDeudaViaje = 0;
-  let totalM3Llevado = 0;
-
-  const destinosSet = new Set();
-  const resumenTipos = {};
+  let totalMaterialesLlevados = 0, totalDeudaViaje = 0, totalM3Llevado = 0;
+  const destinosSet = new Set(), resumenTipos = {};
 
   const detallesProcesados = cargo.detalles.map((d) => {
-    const lleva = parseInt(d.LLEVA || 0);
-    const devuelve = parseInt(d.DEVUELVE || 0);
+    const lleva = parseInt(d.LLEVA || 0), devuelve = parseInt(d.DEVUELVE || 0);
     const deuda = parseInt(d.DEUDA !== undefined && d.DEUDA !== "" ? d.DEUDA : lleva - devuelve);
-
     const destinoCat = AppState.datos.destinos.find((x) => x.ID_DSTN === d.DESTINO);
-    const nombreDestino = destinoCat ? destinoCat.REFERENCIA : d.DESTINO || "Desconocido";
-
     const materialCat = AppState.datos.materiales.find((m) => m.ID_MEMB === d.MATERIAL);
-    const nombreMaterial = materialCat ? materialCat.DESCRIPCION : d.MATERIAL || "Desconocido";
-
-    const m3Unitario = materialCat && materialCat.M3 ? parseFloat(String(materialCat.M3).replace(",", ".")) : 0;
-    const m3Llevado = m3Unitario * lleva;
-
-    return { ...d, lleva, devuelve, deuda, nombreDestino, nombreMaterial, m3Llevado };
+    const m3Llevado = (materialCat && materialCat.M3 ? parseFloat(String(materialCat.M3).replace(",", ".")) : 0) * lleva;
+    return { ...d, lleva, devuelve, deuda, nombreDestino: destinoCat ? destinoCat.REFERENCIA : d.DESTINO || "Desconocido", nombreMaterial: materialCat ? materialCat.DESCRIPCION : d.MATERIAL || "Desconocido", m3Llevado };
   });
 
   detallesProcesados.forEach((d) => {
-    totalMaterialesLlevados += d.lleva;
-    totalDeudaViaje += d.deuda;
-    totalM3Llevado += d.m3Llevado;
-
+    totalMaterialesLlevados += d.lleva; totalDeudaViaje += d.deuda; totalM3Llevado += d.m3Llevado;
     destinosSet.add(d.nombreDestino);
-
-    if (!resumenTipos[d.nombreMaterial]) resumenTipos[d.nombreMaterial] = 0;
-    resumenTipos[d.nombreMaterial] += d.lleva;
+    resumenTipos[d.nombreMaterial] = (resumenTipos[d.nombreMaterial] || 0) + d.lleva;
   });
 
   document.getElementById("mdlTitleCargo").textContent = cargo.idCargo;
   document.getElementById("mdlChofer").textContent = cargo.choferNombre;
   document.getElementById("mdlHora").textContent = cargo.hora || "--";
-  // Traductor del Área en el Modal
+  
   const areaRaw = cargo.detalles[0]?.AREA || cargo.area || "Almacén PT";
   const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
   document.getElementById("mdlDespacho").textContent = areaCat ? areaCat.REFERENCIA : areaRaw;
@@ -870,119 +734,95 @@ function abrirDetalle(idCargo) {
 
   const vehiculoObj = AppState.datos.vehiculos.find(v => v.PLACA === cargo.placa);
   let fotoUrl = "https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&q=80&w=800";
-  let nombreVehiculo = cargo.placa || "S/N";
-
-  if (vehiculoObj) {
-    nombreVehiculo = vehiculoObj.DISPLAY_NAME || cargo.placa;
-    if (vehiculoObj.FOTO_VEHICULO) {
-      fotoUrl = String(vehiculoObj.FOTO_VEHICULO).trim();
-    }
-  }
+  if (vehiculoObj && vehiculoObj.FOTO_VEHICULO) fotoUrl = String(vehiculoObj.FOTO_VEHICULO).trim();
 
   document.getElementById("imgVehiculoModal").src = fotoUrl;
-  document.getElementById("mdlPlaca").textContent = nombreVehiculo;
+  document.getElementById("mdlPlaca").textContent = vehiculoObj ? vehiculoObj.DISPLAY_NAME : cargo.placa || "S/N";
 
   const mdlBadge = document.getElementById("mdlBadgeDeuda");
   if (totalDeudaViaje > 0) {
     mdlBadge.innerHTML = `<span class="bg-pink-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 w-fit shadow-lg shadow-pink-900/50"><svg class="w-4 h-4 animate-spin-slow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Debe ${totalDeudaViaje} materiales</span>`;
   } else if (totalDeudaViaje < 0) {
-    mdlBadge.innerHTML = `<span class="bg-amber-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg shadow-amber-900/50">Excedente: ${Math.abs(totalDeudaViaje)}</span>`;
+    mdlBadge.innerHTML = `<span class="bg-amber-500 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg shadow-amber-900/50">Excedente: ${Math.abs(totalDeudaViaje)}</span>`;
   } else {
     mdlBadge.innerHTML = `<span class="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg shadow-emerald-900/50">Completado / Sin deuda</span>`;
   }
 
-  const arrDestinos = Array.from(destinosSet);
-  document.getElementById("mdlDestinosCount").textContent = `(${arrDestinos.length})`;
-  document.getElementById("mdlDestinosList").innerHTML = arrDestinos.map((dest) => `<div class="truncate" title="${dest}">${dest}</div>`).join("");
+  document.getElementById("mdlDestinosCount").textContent = `(${destinosSet.size})`;
+  document.getElementById("mdlDestinosList").innerHTML = Array.from(destinosSet).map((dest) => `<div class="truncate" title="${dest}">${dest}</div>`).join("");
+  document.getElementById("mdlTiposCount").textContent = `(${Object.keys(resumenTipos).length})`;
+  document.getElementById("mdlTiposList").innerHTML = Object.keys(resumenTipos).map((tipo) => `<div class="truncate" title="${tipo}"><span class="text-emerald-600 dark:text-emerald-400 font-bold mr-1">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
 
-  const arrTiposKeys = Object.keys(resumenTipos);
-  document.getElementById("mdlTiposCount").textContent = `(${arrTiposKeys.length})`;
-  document.getElementById("mdlTiposList").innerHTML = arrTiposKeys.map((tipo) => `<div class="truncate" title="${tipo}"><span class="text-emerald-400 font-bold mr-1">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
-
- // TOTALES EN EL ENCABEZADO DE LA TABLA DEL MODAL
   document.getElementById("mdlTotalMateriales").outerHTML = `
     <span id="mdlTotalMateriales" class="flex items-center gap-2">
-      <span class="bg-gray-700 text-white px-2 py-0.5 rounded text-sm">${totalMaterialesLlevados}</span>
-      <span class="bg-gray-900 border border-gray-600 text-emerald-400 font-mono px-2 py-0.5 rounded text-xs shadow-inner">
+      <span class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white px-2 py-0.5 rounded text-sm">${totalMaterialesLlevados}</span>
+      <span class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 text-emerald-600 dark:text-emerald-400 font-mono px-2 py-0.5 rounded text-xs shadow-sm dark:shadow-inner">
         Volumen: ${totalM3Llevado.toFixed(3)} m³
       </span>
     </span>
   `;
 
-  // CORRECCIÓN: Se eliminó 'truncate', 'max-w-[]' y 'whitespace-nowrap'. 
-  // Ahora el texto fluye naturalmente hacia abajo y la tabla respeta el ancho del modal.
   const tablaHTML = detallesProcesados.map((det) => `
-    <tr class="hover:bg-gray-800/50 transition-colors border-b border-gray-800 last:border-0 ${det.deuda <= 0 ? "opacity-60 bg-gray-900/30" : ""}">
-      <td class="px-3 py-3 text-gray-400 align-middle">${det.nombreDestino}</td>
+    <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors border-b border-gray-200 dark:border-gray-800 last:border-0 ${det.deuda <= 0 ? "opacity-60 bg-gray-50 dark:bg-gray-900/30" : ""}">
+      <td class="px-3 py-3 text-gray-600 dark:text-gray-400 align-middle">${det.nombreDestino}</td>
       <td class="px-3 py-3 align-middle">
-        <div class="${det.deuda <= 0 ? "text-gray-500" : "text-gray-200"} font-medium leading-snug">${det.nombreMaterial}</div>
-        <div class="text-[10px] text-emerald-400/80 font-mono mt-1">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
+        <div class="${det.deuda <= 0 ? "text-gray-500" : "text-gray-800 dark:text-gray-200"} font-medium leading-snug">${det.nombreMaterial}</div>
+        <div class="text-[10px] text-emerald-600 dark:text-emerald-400/80 font-mono mt-1">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
       </td>
       <td class="px-3 py-3 align-middle">
-         <div class="flex items-center justify-center gap-2 md:gap-3 text-xs bg-gray-900/50 rounded-lg p-1.5 border border-gray-700 w-max mx-auto">
-            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Lleva</span><span class="text-white font-bold">${det.lleva}</span></div>
-            <div class="w-px h-6 bg-gray-700"></div>
-            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Devuelto</span><span class="text-emerald-400 font-bold">${det.devuelve}</span></div>
-            <div class="w-px h-6 bg-gray-700"></div>
-            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Deuda</span><span class="${det.deuda > 0 ? "text-red-400" : det.deuda < 0 ? "text-amber-400" : "text-gray-500"} font-bold">${det.deuda}</span></div>
+         <div class="flex items-center justify-center gap-2 md:gap-3 text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg p-1.5 border border-gray-200 dark:border-gray-700 w-max mx-auto">
+            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Lleva</span><span class="text-gray-800 dark:text-white font-bold">${det.lleva}</span></div>
+            <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
+            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Devuelto</span><span class="text-emerald-600 dark:text-emerald-400 font-bold">${det.devuelve}</span></div>
+            <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
+            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Deuda</span><span class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-500"} font-bold">${det.deuda}</span></div>
          </div>
       </td>
       <td class="px-3 py-3 align-middle w-24">
         <input type="number" min="0" data-id="${det.ID_DETALLE}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
-               class="w-full bg-gray-900 border border-gray-600 rounded p-1.5 text-center text-emerald-400 font-bold focus:border-emerald-500 outline-none mdl-return-input transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-800"
+               class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1.5 text-center text-emerald-600 dark:text-emerald-400 font-bold focus:border-emerald-500 outline-none mdl-return-input transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                ${det.deuda <= 0 ? "disabled" : ""}>
       </td>
     </tr>
   `).join("");
   
-  // CORRECCIÓN: Quitamos 'whitespace-nowrap' de la etiqueta <table>
-  document.getElementById("mdlTablaMateriales").parentNode.className = "w-full text-left text-xs text-gray-300";
-  document.getElementById("mdlTablaMateriales").innerHTML = tablaHTML;
+  const tb = document.getElementById("mdlTablaMateriales");
+  tb.parentNode.className = "w-full text-left text-xs text-gray-700 dark:text-gray-300";
+  tb.innerHTML = tablaHTML;
 
   document.getElementById("btnLiquidarModal").setAttribute("onclick", `procesarLiquidacionModal(this, '${cargo.idCargo}')`);
   document.getElementById("btnPrintModal").onclick = () => generarDocumentoImpresion(cargo.idCargo);
 
   const inputsRetorna = document.querySelectorAll(".mdl-return-input:not([disabled])");
-  
   inputsRetorna.forEach((input, index) => {
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        if (index < inputsRetorna.length - 1) {
-          inputsRetorna[index + 1].focus();
-        } else {
-          document.getElementById("btnLiquidarModal").focus();
-        }
+        if (index < inputsRetorna.length - 1) inputsRetorna[index + 1].focus();
+        else document.getElementById("btnLiquidarModal").focus();
       }
     });
   });
 
   const modal = document.getElementById("modalDetalle");
   const modalContent = document.getElementById("modalDetalleContent");
+  
+  modalContent.className = "bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl rounded-2xl w-[95%] max-w-7xl max-h-[90vh] flex flex-col overflow-hidden transform scale-95 transition-transform duration-300";
   modal.classList.remove("hidden");
 
   setTimeout(() => {
     modal.classList.remove("opacity-0");
     modalContent.classList.remove("scale-95");
-
-    if (inputsRetorna.length > 0) {
-      inputsRetorna[0].focus();
-    }
+    if (inputsRetorna.length > 0) inputsRetorna[0].focus();
   }, 50);
-  }
+}
 
 async function procesarLiquidacionModal(btnElement, idCargo) {
   const inputs = document.querySelectorAll(".mdl-return-input:not([disabled])");
-
   const payloadDevolucion = [];
   inputs.forEach((input) => {
     const qty = parseInt(input.value);
-    if (qty > 0) {
-      payloadDevolucion.push({
-        id_detalle: input.getAttribute("data-id"),
-        qty: qty
-      });
-    }
+    if (qty > 0) payloadDevolucion.push({ id_detalle: input.getAttribute("data-id"), qty: qty });
   });
 
   if (payloadDevolucion.length === 0) return mostrarAlerta("Ingresa al menos una cantidad mayor a 0 en la columna 'Retorna'.", "warning", "Datos Insuficientes");
@@ -993,48 +833,267 @@ async function procesarLiquidacionModal(btnElement, idCargo) {
 
   try {
     const res = await fetch(API_URL, {
-      method: "POST",
-      redirect: "follow",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        action: "updateDevolucion",
-        token: API_SECRET_TOKEN,
-        data: payloadDevolucion,
-        gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido' 
-      })
+      method: "POST", redirect: "follow", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "updateDevolucion", token: API_SECRET_TOKEN, data: payloadDevolucion, gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido' })
     });
     
     const result = await res.json();
-
     if (result.status === "success") {
       mostrarAlerta(`Liquidación procesada correctamente. Se actualizaron ${result.data.procesados} registros.`, "success", "¡Guardado Exitoso!");
       cerrarDetalle();
       cargarViajesPendientes();
-    } else {
-      throw new Error(result.message);
-    }
+    } else throw new Error(result.message);
   } catch (err) {
     mostrarAlerta("Error del servidor: " + err.message, "error", "Fallo de Conexión");
   } finally {
-    btnElement.innerHTML = textoOriginal;
-    btnElement.disabled = false;
+    btnElement.innerHTML = textoOriginal; btnElement.disabled = false;
   }
 }
 
 function cerrarDetalle() {
   const modal = document.getElementById("modalDetalle");
   const modalContent = document.getElementById("modalDetalleContent");
-
   modal.classList.add("opacity-0");
   modalContent.classList.add("scale-95");
-
-  setTimeout(() => {
-    modal.classList.add("hidden");
-  }, 300); 
+  setTimeout(() => modal.classList.add("hidden"), 300); 
 }
 
 // ==========================================
-// MOTOR DE IMPRESIÓN Y PDF (FORMATO COMPACTO / MEDIA HOJA)
+// MÓDULO HISTÓRICO DUAL-THEME
+// ==========================================
+document.getElementById("btnRefreshHistorico").addEventListener("click", cargarHistorico);
+document.getElementById("inBuscarHistorico").addEventListener("input", renderizarHistorico);
+document.getElementById("inDesdeHistorico").addEventListener("change", renderizarHistorico);
+document.getElementById("inHastaHistorico").addEventListener("change", renderizarHistorico);
+
+window.setHistorySort = function (key) {
+  if (AppState.sortHistoryConfig.key === key) AppState.sortHistoryConfig.asc = !AppState.sortHistoryConfig.asc;
+  else { AppState.sortHistoryConfig.key = key; AppState.sortHistoryConfig.asc = true; }
+  renderizarHistorico();
+};
+
+function getHistorySortIcon(key) {
+  if (AppState.sortHistoryConfig.key !== key) return `<span class="text-gray-400 dark:text-gray-600 ml-1">↕</span>`;
+  return AppState.sortHistoryConfig.asc ? `<span class="text-blue-600 dark:text-blue-400 ml-1">↑</span>` : `<span class="text-blue-600 dark:text-blue-400 ml-1">↓</span>`;
+}
+
+async function cargarHistorico() {
+  const grid = document.getElementById("gridHistorico");
+  grid.innerHTML = `<div class="text-center text-blue-600 dark:text-blue-400 py-12 animate-pulse font-bold text-lg"><svg class="animate-spin -ml-1 mr-3 h-6 w-6 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Consultando matriz de movimientos...</div>`;
+
+  try {
+    const res = await fetch(`${API_URL}?action=getHistory&token=${API_SECRET_TOKEN}`, { method: "GET", redirect: "follow" });
+    const json = await res.json();
+    if (json.status !== "success") throw new Error(json.message);
+    AppState.historial = json.data;
+    renderizarHistorico();
+  } catch (err) {
+    grid.innerHTML = `<div class="text-center text-red-600 dark:text-red-500 py-8 border border-red-200 dark:border-red-500/50 rounded-xl bg-red-50 dark:bg-red-500/10">Error: ${err.message}</div>`;
+  }
+}
+
+function renderizarHistorico() {
+  const grid = document.getElementById("gridHistorico");
+  const searchTerm = document.getElementById("inBuscarHistorico").value.toLowerCase().trim();
+  const fechaDesde = document.getElementById("inDesdeHistorico").value; 
+  const fechaHasta = document.getElementById("inHastaHistorico").value; 
+
+  let filtrados = AppState.historial.map(det => {
+    const materialObj = AppState.datos.materiales.find(m => m.ID_MEMB === det.material);
+    const destinoObj = AppState.datos.destinos.find(d => d.ID_DSTN === det.destino);
+    const emisorObj = AppState.datos.destinos.find(d => d.ID_DSTN === det.emisor);
+    const idChoferLimpio = det.chofer ? String(det.chofer).replace(/'/g, '') : '';
+    const choferObj = AppState.datos.choferes.find(c => c.ID_CHFR === idChoferLimpio);
+
+    return {
+      ...det,
+      materialName: materialObj ? materialObj.DESCRIPCION : det.material,
+      destinoName: destinoObj ? destinoObj.REFERENCIA : det.destino,
+      emisorName: emisorObj ? emisorObj.REFERENCIA : (det.emisor || 'Almacén PT'),
+      choferName: choferObj ? choferObj.NOMBRE : det.chofer
+    };
+  });
+
+  AppState.historialFiltrado = filtrados;
+
+  if (fechaDesde || fechaHasta) {
+    filtrados = filtrados.filter(item => {
+      if (!item.horaCargo) return false;
+      const datePart = item.horaCargo.split(' ')[0], parts = datePart.split('/');
+      if(parts.length !== 3) return true; 
+      const itemDateISO = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      let pasaDesde = true, pasaHasta = true;
+      if (fechaDesde) pasaDesde = itemDateISO >= fechaDesde;
+      if (fechaHasta) pasaHasta = itemDateISO <= fechaHasta;
+      return pasaDesde && pasaHasta;
+    });
+  }
+
+  if (searchTerm) {
+    filtrados = filtrados.filter(item => {
+      return (item.idCargo || "").toLowerCase().includes(searchTerm) || (item.materialName || "").toLowerCase().includes(searchTerm) ||
+             (item.destinoName || "").toLowerCase().includes(searchTerm) || (item.choferName || "").toLowerCase().includes(searchTerm) ||
+             (item.horaCargo || "").toLowerCase().includes(searchTerm);
+    });
+  }
+
+  const { key, asc } = AppState.sortHistoryConfig;
+  filtrados.sort((a, b) => {
+    let valA = a[key], valB = b[key];
+    if (['lleva', 'devuelve', 'deuda'].includes(key)) {
+      valA = parseFloat(valA) || 0; valB = parseFloat(valB) || 0;
+      return asc ? valA - valB : valB - valA;
+    } else if (key === 'horaCargo') {
+      valA = estandarizarFecha(valA); valB = estandarizarFecha(valB);
+    } else {
+      valA = String(valA || "").toLowerCase(); valB = String(valB || "").toLowerCase();
+    }
+    if (valA < valB) return asc ? -1 : 1;
+    if (valA > valB) return asc ? 1 : -1;
+    return 0;
+  });
+
+  if (filtrados.length === 0) {
+    grid.innerHTML = `<div class="text-center text-gray-500 dark:text-gray-400 py-12 font-bold bg-white dark:bg-gray-800/40 rounded-2xl border border-gray-200 dark:border-gray-700/50 italic">No se encontraron movimientos que coincidan con los filtros.</div>`;
+    return;
+  }
+
+  let html = `
+    <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700/80 shadow-sm dark:shadow-inner max-h-[600px] relative bg-white dark:bg-transparent">
+      <table class="w-full text-left text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
+        <thead class="bg-gray-100 dark:bg-gray-900/95 sticky top-0 border-b border-gray-200 dark:border-gray-700 uppercase font-semibold text-gray-500 dark:text-gray-500 z-10 backdrop-blur-sm shadow-sm dark:shadow-md select-none">
+          <tr>
+            <th class="px-4 py-3 border-r border-gray-200 dark:border-gray-800/50 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setHistorySort('horaCargo')">Fecha/Hora ${getHistorySortIcon('horaCargo')}</th>
+            <th class="px-4 py-3 border-r border-gray-200 dark:border-gray-800/50 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setHistorySort('idCargo')">ID Cargo ${getHistorySortIcon('idCargo')}</th>
+            <th class="px-4 py-3 border-r border-gray-200 dark:border-gray-800/50 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setHistorySort('choferName')">Chofer ${getHistorySortIcon('choferName')}</th>
+            <th class="px-4 py-3 border-r border-gray-200 dark:border-gray-800/50 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setHistorySort('materialName')">Material ${getHistorySortIcon('materialName')}</th>
+            <th class="px-4 py-3 border-r border-gray-200 dark:border-gray-800/50 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setHistorySort('destinoName')">Destino ${getHistorySortIcon('destinoName')}</th>
+            <th class="px-3 py-3 text-center border-r border-gray-200 dark:border-gray-800/50 text-gray-800 dark:text-white cursor-pointer hover:text-black dark:hover:text-gray-300 transition-colors" onclick="setHistorySort('lleva')">Lleva ${getHistorySortIcon('lleva')}</th>
+            <th class="px-3 py-3 text-center border-r border-gray-200 dark:border-gray-800/50 text-emerald-600 dark:text-emerald-400 cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors" onclick="setHistorySort('devuelve')">Devuelto ${getHistorySortIcon('devuelve')}</th>
+            <th class="px-3 py-3 text-center border-r border-gray-200 dark:border-gray-800/50 text-pink-600 dark:text-pink-400 cursor-pointer hover:text-pink-700 dark:hover:text-pink-300 transition-colors" onclick="setHistorySort('deuda')">Deuda ${getHistorySortIcon('deuda')}</th>
+            <th class="px-4 py-3 text-center">Estado</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200 dark:divide-gray-800/60">
+  `;
+
+  filtrados.forEach(row => {
+    let badgeEstadoHTML = "";
+    const deuda = parseInt(row.deuda);
+    
+    if (deuda > 0) {
+      badgeEstadoHTML = `<span class="bg-pink-50 dark:bg-pink-600/20 text-pink-600 dark:text-pink-400 border border-pink-200 dark:border-pink-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Pendiente</span>`;
+    } else if (deuda < 0) {
+      badgeEstadoHTML = `<span class="bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Excedente</span>`;
+    } else {
+      badgeEstadoHTML = `<span class="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Cerrado</span>`;
+    }
+
+    html += `
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group">
+        <td class="px-4 py-3.5 font-mono text-gray-500 dark:text-gray-400 text-[11px] cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-300 transition-colors celda-trazabilidad border-l-2 border-transparent hover:border-blue-500" onclick="abrirTrazabilidad(event, '${row.idDetalle}')">
+          <div class="flex items-center gap-1.5" title="Click para ver auditoría">
+            <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            ${row.horaCargo || '--'}
+          </div>
+        </td>
+        <td class="px-4 py-3.5 font-mono text-blue-600 dark:text-blue-400 font-bold tracking-tight">${row.idCargo || '--'}</td>
+        <td class="px-4 py-3.5 truncate max-w-[150px] font-medium text-gray-800 dark:text-gray-200" title="${row.choferName}">${row.choferName}</td>
+        <td class="px-4 py-3.5 truncate max-w-[200px]" title="${row.materialName}">${row.materialName}</td>
+        <td class="px-4 py-3.5 truncate max-w-[150px] text-gray-500 dark:text-gray-400" title="${row.destinoName}">${row.destinoName}</td>
+        <td class="px-3 py-3.5 text-center text-gray-900 dark:text-white font-black bg-gray-50 dark:bg-gray-900/30">${row.lleva}</td>
+        <td class="px-3 py-3.5 text-center text-emerald-600 dark:text-emerald-400 font-black bg-emerald-50 dark:bg-emerald-900/10">${row.devuelve}</td>
+        <td class="px-3 py-3.5 text-center ${deuda > 0 ? 'text-pink-600 dark:text-pink-400 bg-pink-50 dark:bg-pink-900/10' : 'text-gray-500'} font-black">${deuda}</td>
+        <td class="px-4 py-3.5 text-center">${badgeEstadoHTML}</td>
+      </tr>
+    `;
+  });
+
+  html += `</tbody></table></div>`;
+  grid.innerHTML = html;
+}
+
+// ==========================================
+// MINIMODAL TRAZABILIDAD DUAL-THEME
+// ==========================================
+window.abrirTrazabilidad = function(e, idDetalle) {
+    const row = AppState.historialFiltrado.find(r => r.idDetalle === idDetalle);
+    if (!row) return;
+
+    let globo = document.getElementById('globo-trazabilidad');
+    if (!globo) {
+        globo = document.createElement('div');
+        globo.id = 'globo-trazabilidad';
+        globo.className = 'absolute z-[100] hidden bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-600 p-4 w-80 text-left transform transition-opacity opacity-0';
+        globo.innerHTML = `
+            <div id="trazabilidad-contenido" class="space-y-3"></div>
+            <div id="trazabilidad-flecha" class="absolute w-4 h-4 bg-white dark:bg-gray-900 border-b border-r border-gray-200 dark:border-gray-600 rotate-45 transition-all"></div>
+        `;
+        document.body.appendChild(globo);
+
+        document.addEventListener('click', (ev) => {
+            if (!ev.target.closest('.celda-trazabilidad') && !globo.contains(ev.target)) {
+                globo.classList.add('hidden');
+                globo.classList.remove('opacity-100');
+            }
+        });
+    }
+
+    const contenido = document.getElementById('trazabilidad-contenido');
+    const flecha = document.getElementById('trazabilidad-flecha');
+
+    contenido.innerHTML = `
+        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/30 p-3 rounded-lg shadow-sm dark:shadow-inner">
+          <p class="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
+            1. Despacho / Emisión
+          </p>
+          <p class="text-xs text-gray-700 dark:text-gray-200 mb-1"><span class="text-gray-500 mr-1">Gestor:</span> ${row.gestorCargo || 'No registrado'}</p>
+          <p class="text-xs text-gray-700 dark:text-gray-200 mb-2"><span class="text-gray-500 mr-1">Ruta:</span> <span class="font-bold text-gray-900 dark:text-gray-100">${row.emisorName}</span> ➔ <span class="font-bold text-gray-900 dark:text-gray-100">${row.destinoName}</span></p>
+          <p class="text-[10px] text-blue-700 dark:text-blue-300 font-mono bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded w-fit">${row.horaCargo || '--'}</p>
+        </div>
+        
+        <div class="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-500/30 p-3 rounded-lg shadow-sm dark:shadow-inner">
+          <p class="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+            2. Descargo / Devolución
+          </p>
+          ${row.horaDescargo ? `
+             <p class="text-xs text-gray-700 dark:text-gray-200 mb-2"><span class="text-gray-500 mr-1">Receptor:</span> ${row.gestorDescargo || 'No registrado'}</p>
+             <p class="text-[10px] text-emerald-700 dark:text-emerald-300 font-mono bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded w-fit">${row.horaDescargo}</p>
+          ` : `
+             <p class="text-xs text-gray-500 italic mt-1 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Bandejas aún en ruta...</p>
+          `}
+        </div>
+    `;
+
+    globo.classList.remove('hidden');
+    globo.classList.remove('opacity-100');
+
+    const rect = e.currentTarget.getBoundingClientRect(); 
+    const globoRect = globo.getBoundingClientRect();
+    
+    let top = rect.top + window.scrollY - globoRect.height - 10;
+    let left = rect.left + window.scrollX + (rect.width / 2) - (globoRect.width / 2);
+
+    flecha.className = "absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-white dark:bg-gray-900 border-b border-r border-gray-200 dark:border-gray-600 rotate-45 transition-all";
+
+    if (top < window.scrollY + 10) {
+        top = rect.bottom + window.scrollY + 10;
+        flecha.className = "absolute -top-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-white dark:bg-gray-900 border-t border-l border-gray-200 dark:border-gray-600 rotate-45 transition-all";
+    }
+
+    if (left < 10) left = 10;
+    if (left + globoRect.width > window.innerWidth - 10) left = window.innerWidth - globoRect.width - 10;
+
+    globo.style.top = top + 'px';
+    globo.style.left = left + 'px';
+    
+    setTimeout(() => globo.classList.add('opacity-100'), 10);
+};
+
+// ==========================================
+// MOTOR DE IMPRESIÓN (PDF)
 // ==========================================
 function generarDocumentoImpresion(idCargo, targetWindow = null) {
   const cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
@@ -1045,14 +1104,11 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
   const destinosSet = new Set();
   const resumenTipos = {};
 
-  // TABLA COMPACTADA: py-1 px-2 en lugar de py-2 px-4
   const filasTablaHTML = cargo.detalles.map((d) => {
       const lleva = parseInt(d.LLEVA || 0);
       totalLlevado += lleva;
-
       const destinoCat = AppState.datos.destinos.find((x) => x.ID_DSTN === d.DESTINO);
       const nombreDestino = destinoCat ? destinoCat.REFERENCIA : d.DESTINO || "Desconocido";
-
       const materialCat = AppState.datos.materiales.find((m) => m.ID_MEMB === d.MATERIAL);
       const nombreMaterial = materialCat ? materialCat.DESCRIPCION : d.MATERIAL || "Desconocido";
       
@@ -1074,12 +1130,11 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
 
   const destinosHTML = Array.from(destinosSet).map((dest) => `<div>• ${dest}</div>`).join("");
   const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span class="font-bold mr-1">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
-  
-  // Traductor del Área
   const areaRaw = cargo.detalles[0]?.AREA || cargo.area || "Almacén PT";
   const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
   const areaResponsable = areaCat ? areaCat.REFERENCIA : areaRaw;
 
+  // DUAL-THEME LOADER EN LA PESTAÑA TEMPORAL
   const htmlPlantilla = `
 <!DOCTYPE html>
 <html lang="es">
@@ -1089,21 +1144,19 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        /* COMPRESIÓN: Quitamos el min-height:29.7cm para que ocupe solo lo necesario. Padding reducido a 1cm */
+        body { font-family: 'Inter', sans-serif; background-color: #f9fafb; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        @media (prefers-color-scheme: dark) { body { background-color: #111827; } }
         .a4-container { max-width: 21cm; margin: 1rem auto; background: white; padding: 1cm; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
         #lista tr:nth-child(even) { background-color: #f9fafb; }
         @media print {
             body { background-color: white; }
             .a4-container { margin: 0; padding: 0; box-shadow: none; max-width: 100%; }
             .no-print { display: none !important; }
-            /* COMPRESIÓN: Margen de hoja de 0.5cm */
             @page { size: A4 portrait; margin: 0.5cm; }
         }
     </style>
 </head>
 <body class="text-gray-800 antialiased text-xs">
-
     <div class="fixed bottom-6 right-6 flex flex-col gap-3 no-print z-50">
         <button onclick="window.print()" class="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white px-5 py-3 rounded-full shadow-lg font-semibold transition-transform transform hover:scale-105">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
@@ -1155,15 +1208,9 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
                 </tbody>
                 <tfoot>
                     <tr class="bg-gray-100 border-t border-gray-300">
-                        <td colspan="2" class="py-2 px-2 text-right font-bold text-gray-600 uppercase text-[10px] tracking-wider">
-                            Total General del Viaje:
-                        </td>
-                        <td class="py-2 px-2 text-center font-black text-blue-700 text-base">
-                            ${totalLlevado} <span class="text-[9px] text-gray-500 font-bold uppercase">und</span>
-                        </td>
-                        <td class="py-2 px-2 text-center font-mono text-emerald-600 font-bold text-xs">
-                            ${totalM3Llevado.toFixed(3)} m³
-                        </td>
+                        <td colspan="2" class="py-2 px-2 text-right font-bold text-gray-600 uppercase text-[10px] tracking-wider">Total General del Viaje:</td>
+                        <td class="py-2 px-2 text-center font-black text-blue-700 text-base">${totalLlevado} <span class="text-[9px] text-gray-500 font-bold uppercase">und</span></td>
+                        <td class="py-2 px-2 text-center font-mono text-emerald-600 font-bold text-xs">${totalM3Llevado.toFixed(3)} m³</td>
                     </tr>
                 </tfoot>
             </table>
@@ -1199,7 +1246,7 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
             btnContainer.style.display = 'none';
             const element = document.getElementById('pdf-content');
             const opt = {
-                margin: [5, 5, 5, 5], // COMPRESIÓN: Márgenes de hoja a 5mm
+                margin: [5, 5, 5, 5],
                 filename: document.title + '.pdf',
                 image: { type: 'jpeg', quality: 1 },
                 html2canvas: { scale: 2, useCORS: true, letterRendering: true }, 
@@ -1220,273 +1267,3 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
     printWindow.document.close();
   }
 }
-
-// ==========================================
-// MÓDULO: HISTÓRICO DE MOVIMIENTOS
-// ==========================================
-document.getElementById("btnRefreshHistorico").addEventListener("click", cargarHistorico);
-document.getElementById("inBuscarHistorico").addEventListener("input", renderizarHistorico);
-document.getElementById("inDesdeHistorico").addEventListener("change", renderizarHistorico);
-document.getElementById("inHastaHistorico").addEventListener("change", renderizarHistorico);
-
-// MOTOR DE ORDENAMIENTO PARA HISTÓRICO
-window.setHistorySort = function (key) {
-  if (AppState.sortHistoryConfig.key === key) {
-    AppState.sortHistoryConfig.asc = !AppState.sortHistoryConfig.asc;
-  } else {
-    AppState.sortHistoryConfig.key = key;
-    AppState.sortHistoryConfig.asc = true;
-  }
-  renderizarHistorico();
-};
-
-function getHistorySortIcon(key) {
-  if (AppState.sortHistoryConfig.key !== key) return `<span class="text-gray-600 ml-1">↕</span>`;
-  return AppState.sortHistoryConfig.asc ? `<span class="text-blue-400 ml-1">↑</span>` : `<span class="text-blue-400 ml-1">↓</span>`;
-}
-
-async function cargarHistorico() {
-  const grid = document.getElementById("gridHistorico");
-  grid.innerHTML = `<div class="text-center text-blue-400 py-12 animate-pulse font-bold text-lg"><svg class="animate-spin -ml-1 mr-3 h-6 w-6 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Consultando matriz de movimientos...</div>`;
-
-  try {
-    const res = await fetch(`${API_URL}?action=getHistory`, { method: "GET", redirect: "follow" });
-    const json = await res.json();
-    if (json.status !== "success") throw new Error(json.message);
-
-    AppState.historial = json.data;
-    renderizarHistorico();
-  } catch (err) {
-    grid.innerHTML = `<div class="text-center text-red-500 py-8 border border-red-500/50 rounded-xl bg-red-500/10">Error: ${err.message}</div>`;
-  }
-}
-
-function renderizarHistorico() {
-  const grid = document.getElementById("gridHistorico");
-  const searchTerm = document.getElementById("inBuscarHistorico").value.toLowerCase().trim();
-  const fechaDesde = document.getElementById("inDesdeHistorico").value; 
-  const fechaHasta = document.getElementById("inHastaHistorico").value; 
-
-  // 1. Traducción inteligente (IDs a Nombres Reales)
-  let filtrados = AppState.historial.map(det => {
-    const materialObj = AppState.datos.materiales.find(m => m.ID_MEMB === det.material);
-    const destinoObj = AppState.datos.destinos.find(d => d.ID_DSTN === det.destino);
-    const emisorObj = AppState.datos.destinos.find(d => d.ID_DSTN === det.emisor); // Traductor Emisor
-    const idChoferLimpio = det.chofer ? String(det.chofer).replace(/'/g, '') : '';
-    const choferObj = AppState.datos.choferes.find(c => c.ID_CHFR === idChoferLimpio);
-
-    return {
-      ...det,
-      materialName: materialObj ? materialObj.DESCRIPCION : det.material,
-      destinoName: destinoObj ? destinoObj.REFERENCIA : det.destino,
-      emisorName: emisorObj ? emisorObj.REFERENCIA : (det.emisor || 'Almacén PT'),
-      choferName: choferObj ? choferObj.NOMBRE : det.chofer
-    };
-  });
-
-  // Guardamos en memoria global para que el Minimodal pueda leerlo al hacer clic
-  AppState.historialFiltrado = filtrados;
-
-  // 2. Filtro por Rango de Fechas
-  if (fechaDesde || fechaHasta) {
-    filtrados = filtrados.filter(item => {
-      if (!item.horaCargo) return false;
-      const datePart = item.horaCargo.split(' ')[0]; 
-      const parts = datePart.split('/');
-      if(parts.length !== 3) return true; 
-      
-      const itemDateISO = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-      
-      let pasaDesde = true;
-      let pasaHasta = true;
-
-      if (fechaDesde) pasaDesde = itemDateISO >= fechaDesde;
-      if (fechaHasta) pasaHasta = itemDateISO <= fechaHasta;
-
-      return pasaDesde && pasaHasta;
-    });
-  }
-
-  // 3. Filtro de Búsqueda Global (Texto)
-  if (searchTerm) {
-    filtrados = filtrados.filter(item => {
-      return (item.idCargo || "").toLowerCase().includes(searchTerm) ||
-             (item.materialName || "").toLowerCase().includes(searchTerm) ||
-             (item.destinoName || "").toLowerCase().includes(searchTerm) ||
-             (item.choferName || "").toLowerCase().includes(searchTerm) ||
-             (item.horaCargo || "").toLowerCase().includes(searchTerm);
-    });
-  }
-
-  // 4. APLICAR ORDENAMIENTO (Clic en Cabeceras)
-  const { key, asc } = AppState.sortHistoryConfig;
-  filtrados.sort((a, b) => {
-    let valA = a[key];
-    let valB = b[key];
-
-    if (['lleva', 'devuelve', 'deuda'].includes(key)) {
-      valA = parseFloat(valA) || 0;
-      valB = parseFloat(valB) || 0;
-      return asc ? valA - valB : valB - valA;
-    } 
-    else if (key === 'horaCargo') {
-      valA = estandarizarFecha(valA);
-      valB = estandarizarFecha(valB);
-    } 
-    else {
-      valA = String(valA || "").toLowerCase();
-      valB = String(valB || "").toLowerCase();
-    }
-
-    if (valA < valB) return asc ? -1 : 1;
-    if (valA > valB) return asc ? 1 : -1;
-    return 0;
-  });
-
-  if (filtrados.length === 0) {
-    grid.innerHTML = `<div class="text-center text-gray-400 py-12 font-bold bg-gray-800/40 rounded-2xl border border-gray-700/50 italic">No se encontraron movimientos que coincidan con los filtros.</div>`;
-    return;
-  }
-
-  // 5. CONSTRUCCIÓN DE LA TABLA
-  let html = `
-    <div class="overflow-x-auto rounded-xl border border-gray-700/80 shadow-inner max-h-[600px] relative">
-      <table class="w-full text-left text-xs text-gray-300 whitespace-nowrap">
-        <thead class="bg-gray-900/95 sticky top-0 border-b border-gray-700 uppercase font-semibold text-gray-500 z-10 backdrop-blur-sm shadow-md select-none">
-          <tr>
-            <th class="px-4 py-3 border-r border-gray-800/50 cursor-pointer hover:text-white transition-colors" onclick="setHistorySort('horaCargo')">Fecha/Hora ${getHistorySortIcon('horaCargo')}</th>
-            <th class="px-4 py-3 border-r border-gray-800/50 cursor-pointer hover:text-white transition-colors" onclick="setHistorySort('idCargo')">ID Cargo ${getHistorySortIcon('idCargo')}</th>
-            <th class="px-4 py-3 border-r border-gray-800/50 cursor-pointer hover:text-white transition-colors" onclick="setHistorySort('choferName')">Chofer ${getHistorySortIcon('choferName')}</th>
-            <th class="px-4 py-3 border-r border-gray-800/50 cursor-pointer hover:text-white transition-colors" onclick="setHistorySort('materialName')">Material ${getHistorySortIcon('materialName')}</th>
-            <th class="px-4 py-3 border-r border-gray-800/50 cursor-pointer hover:text-white transition-colors" onclick="setHistorySort('destinoName')">Destino ${getHistorySortIcon('destinoName')}</th>
-            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-white cursor-pointer hover:text-gray-300 transition-colors" onclick="setHistorySort('lleva')">Lleva ${getHistorySortIcon('lleva')}</th>
-            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-emerald-400 cursor-pointer hover:text-emerald-300 transition-colors" onclick="setHistorySort('devuelve')">Devuelto ${getHistorySortIcon('devuelve')}</th>
-            <th class="px-3 py-3 text-center border-r border-gray-800/50 text-pink-400 cursor-pointer hover:text-pink-300 transition-colors" onclick="setHistorySort('deuda')">Deuda ${getHistorySortIcon('deuda')}</th>
-            <th class="px-4 py-3 text-center">Estado</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-800/60">
-  `;
-
-  filtrados.forEach(row => {
-    let badgeEstadoHTML = "";
-    const deuda = parseInt(row.deuda);
-    
-    if (deuda > 0) {
-      badgeEstadoHTML = `<span class="bg-pink-600/20 text-pink-400 border border-pink-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Pendiente</span>`;
-    } else if (deuda < 0) {
-      badgeEstadoHTML = `<span class="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Excedente</span>`;
-    } else {
-      badgeEstadoHTML = `<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Cerrado</span>`;
-    }
-
-    html += `
-      <tr class="hover:bg-gray-800/60 transition-colors group">
-        <td class="px-4 py-3.5 font-mono text-gray-400 text-[11px] cursor-pointer hover:bg-blue-900/30 hover:text-blue-300 transition-colors celda-trazabilidad border-l-2 border-transparent hover:border-blue-500" onclick="abrirTrazabilidad(event, '${row.idDetalle}')">
-          <div class="flex items-center gap-1.5" title="Click para ver auditoría">
-            <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            ${row.horaCargo || '--'}
-          </div>
-        </td>
-        <td class="px-4 py-3.5 font-mono text-blue-400 font-bold tracking-tight">${row.idCargo || '--'}</td>
-        <td class="px-4 py-3.5 truncate max-w-[150px] font-medium text-gray-200" title="${row.choferName}">${row.choferName}</td>
-        <td class="px-4 py-3.5 truncate max-w-[200px]" title="${row.materialName}">${row.materialName}</td>
-        <td class="px-4 py-3.5 truncate max-w-[150px] text-gray-400" title="${row.destinoName}">${row.destinoName}</td>
-        <td class="px-3 py-3.5 text-center text-white font-black bg-gray-900/30">${row.lleva}</td>
-        <td class="px-3 py-3.5 text-center text-emerald-400 font-black bg-emerald-900/10">${row.devuelve}</td>
-        <td class="px-3 py-3.5 text-center ${deuda > 0 ? 'text-pink-400 bg-pink-900/10' : 'text-gray-500'} font-black">${deuda}</td>
-        <td class="px-4 py-3.5 text-center">${badgeEstadoHTML}</td>
-      </tr>
-    `;
-  });
-
-  html += `</tbody></table></div>`;
-  grid.innerHTML = html;
-}
-
-// ==========================================
-// MINIMODAL FLOTANTE DE TRAZABILIDAD (TRACK & TRACE)
-// ==========================================
-window.abrirTrazabilidad = function(e, idDetalle) {
-    const row = AppState.historialFiltrado.find(r => r.idDetalle === idDetalle);
-    if (!row) return;
-
-    let globo = document.getElementById('globo-trazabilidad');
-    if (!globo) {
-        // Creamos el contenedor del globo dinámicamente la primera vez
-        globo = document.createElement('div');
-        globo.id = 'globo-trazabilidad';
-        globo.className = 'absolute z-[100] hidden bg-gray-900 rounded-xl shadow-2xl border border-gray-600 p-4 w-80 text-left transform transition-opacity opacity-0';
-        globo.innerHTML = `
-            <div id="trazabilidad-contenido" class="space-y-3"></div>
-            <div id="trazabilidad-flecha" class="absolute w-4 h-4 bg-gray-900 border-b border-r border-gray-600 rotate-45 transition-all"></div>
-        `;
-        document.body.appendChild(globo);
-
-        // Auto-cierre al hacer clic fuera
-        document.addEventListener('click', (ev) => {
-            if (!ev.target.closest('.celda-trazabilidad') && !globo.contains(ev.target)) {
-                globo.classList.add('hidden');
-                globo.classList.remove('opacity-100');
-            }
-        });
-    }
-
-    const contenido = document.getElementById('trazabilidad-contenido');
-    const flecha = document.getElementById('trazabilidad-flecha');
-
-    // Dibujamos las dos cajas (Salida y Devolución) con estilo Premium
-    contenido.innerHTML = `
-        <div class="bg-blue-900/20 border border-blue-500/30 p-3 rounded-lg shadow-inner">
-          <p class="text-[10px] text-blue-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
-            1. Despacho / Emisión
-          </p>
-          <p class="text-xs text-gray-200 mb-1"><span class="text-gray-500 mr-1">Gestor:</span> ${row.gestorCargo || 'No registrado'}</p>
-          <p class="text-xs text-gray-200 mb-2"><span class="text-gray-500 mr-1">Ruta:</span> <span class="font-bold text-gray-100">${row.emisorName}</span> ➔ <span class="font-bold text-gray-100">${row.destinoName}</span></p>
-          <p class="text-[10px] text-blue-300 font-mono bg-blue-900/40 px-2 py-0.5 rounded w-fit">${row.horaCargo || '--'}</p>
-        </div>
-        
-        <div class="bg-emerald-900/20 border border-emerald-500/30 p-3 rounded-lg shadow-inner">
-          <p class="text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
-            2. Descargo / Devolución
-          </p>
-          ${row.horaDescargo ? `
-             <p class="text-xs text-gray-200 mb-2"><span class="text-gray-500 mr-1">Receptor:</span> ${row.gestorDescargo || 'No registrado'}</p>
-             <p class="text-[10px] text-emerald-300 font-mono bg-emerald-900/40 px-2 py-0.5 rounded w-fit">${row.horaDescargo}</p>
-          ` : `
-             <p class="text-xs text-gray-500 italic mt-1 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Bandejas aún en ruta...</p>
-          `}
-        </div>
-    `;
-
-    // Lógica de Posicionamiento Inteligente (Para que no se salga de la pantalla)
-    globo.classList.remove('hidden');
-    globo.classList.remove('opacity-100');
-
-    const rect = e.currentTarget.getBoundingClientRect(); 
-    const globoRect = globo.getBoundingClientRect();
-    
-    let top = rect.top + window.scrollY - globoRect.height - 10;
-    let left = rect.left + window.scrollX + (rect.width / 2) - (globoRect.width / 2);
-
-    // Flecha apuntando abajo (Globo arriba)
-    flecha.className = "absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-gray-900 border-b border-r border-gray-600 rotate-45 transition-all";
-
-    // Si el globo choca con el techo de la ventana, lo volteamos para que aparezca abajo
-    if (top < window.scrollY + 10) {
-        top = rect.bottom + window.scrollY + 10;
-        flecha.className = "absolute -top-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-gray-900 border-t border-l border-gray-600 rotate-45 transition-all";
-    }
-
-    // Prevenir desbordamiento horizontal
-    if (left < 10) left = 10;
-    if (left + globoRect.width > window.innerWidth - 10) left = window.innerWidth - globoRect.width - 10;
-
-    globo.style.top = top + 'px';
-    globo.style.left = left + 'px';
-    
-    // Animación de Fade-in
-    setTimeout(() => globo.classList.add('opacity-100'), 10);
-};
