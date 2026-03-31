@@ -45,7 +45,7 @@ if (window === window.top) {
 // 2. SEGURIDAD Y GESTIÓN DE TEMA (INTEGRACIÓN HUB)
 // ==========================================
 window.addEventListener('message', (event) => {
-    if (DOMINIO_HUB_PERMITIDO.includes(event.origin)) {
+    if (!DOMINIO_HUB_PERMITIDO.includes(event.origin)) {
     console.warn("Bloqueo de seguridad:", event.origin);
     return;
 }
