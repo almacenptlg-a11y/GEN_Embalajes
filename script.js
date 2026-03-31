@@ -6,7 +6,11 @@
 const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-QJ6RZdmQw3gJIt80Y6f4iTKyS7BqhXrgHTGWrO0PiSj4m/exec";
 const API_SECRET_TOKEN = "GEN_EMB_2026_SECURE_KEY";
 
-const DOMINIO_HUB_PERMITIDO = "https://almacenptlg-a11y.github.io"; // Cambia al dominio raíz de tu HUB
+const DOMINIO_HUB_PERMITIDO = [
+    "https://almacenptlg-a11y.github.io",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000"
+]; // Cambia al dominio raíz de tu HUB
 
 const AppState = {
   user: null,               
@@ -41,10 +45,10 @@ if (window === window.top) {
 // 2. SEGURIDAD Y GESTIÓN DE TEMA (INTEGRACIÓN HUB)
 // ==========================================
 window.addEventListener('message', (event) => {
-    if (DOMINIO_HUB_PERMITIDO !== "*" && !event.origin.startsWith(DOMINIO_HUB_PERMITIDO)) {
-        console.warn("Bloqueo de seguridad: Origen no reconocido.", event.origin);
-        return; 
-    }
+    if (DOMINIO_HUB_PERMITIDO.includes(event.origin)) {
+    console.warn("Bloqueo de seguridad:", event.origin);
+    return;
+}
 
     const { type, user, theme } = event.data || {};
     
