@@ -1473,7 +1473,7 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
 
   // 1. Renderizado Tabla Escritorio (Desktop) con acciones rápidas de Edición y Eliminación
   const tablaHTML = detallesProcesados.map((det) => {
-    const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, """);
+    const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, '"');
     return `
     <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${det.deuda <= 0 ? "opacity-75 bg-gray-50/70 dark:bg-gray-900/30" : ""} ${det.MATERIAL === highlightMaterialId ? "bg-blue-50/80 dark:bg-blue-900/25 ring-1 ring-inset ring-blue-500/40" : ""}">
       <td class="px-4 py-3.5 text-gray-600 dark:text-gray-400 font-medium">${det.nombreDestino}</td>
@@ -1518,7 +1518,7 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
 
   // 2. Renderizado Tarjetas Táctiles (Móvil) con edición y eliminación
   const cardsMobileHTML = detallesProcesados.map((det) => {
-    const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, """);
+    const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, '"');
     return `
     <div class="pt-3 first:pt-0 ${det.deuda <= 0 ? "opacity-75" : ""}">
       <div class="flex justify-between items-start gap-2 mb-2">
