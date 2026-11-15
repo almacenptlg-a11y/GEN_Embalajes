@@ -51,6 +51,69 @@ if (window === window.top) {
 }
 
 // ==========================================
+// 1.1 MOTOR DE REGLAS DE NEGOCIO Y PERMISOS (RBAC / ABAC)
+// ==========================================
+const AuthRules = {
+  norm(str) {
+    return String(str || '').trim().toUpperCase();
+  },
+
+  isAdmin() {
+    if (!AppState.user) return false;
+    const rol = this.norm(AppState.user.rol || AppState.user.perfil || AppState.user.nivel);
+    return ['ADMIN', 'ADMINISTRADOR', 'SUPERADMIN', 'SISTEMAS'].includes(rol);
+  },
+
+  currentUserName() {
+    return this.norm(AppState.user?.nombre);
+  },
+
+  // Verifica si el cargo tiene al menos 1 unidad devuelta en cualquiera de sus filas
+  cargoTieneDevoluciones(cargo) {
+    if (!cargo || !Array.isArray(cargo.detalles)) return false;
+    return cargo.detalles.some(d => (parseInt(d.DEVUELVE || 0, 10) > 0));
+  },
+
+  // 1. Permiso para editar o eliminar una línea específica
+  canModifyLinea(cargo, det) {
+    if (!AppState.user) return false;
+    if (this.isAdmin()) return true;
+
+    const emisorLinea = this.norm(det['GESTOR CARGO'] || cargo.gestor);
+    const esCreador = emisorLinea && emisorLinea === this.currentUserName();
+    if (!esCreador) return false;
+
+    // Si ya tiene devoluciones registradas en esa línea, solo Admin puede tocarla
+    const devuelto = parseInt(det.DEVUELVE || 0, 10);
+    if (devuelto > 0) return false;
+
+    return true;
+  },
+
+  // 2. Permiso para eliminar el cargo completo
+  canDeleteCargo(cargo) {
+    if (!AppState.user || !cargo) return false;
+    if (this.isAdmin()) return true;
+
+    const creadorCargo = this.norm(cargo.gestor);
+    const esCreador = creadorCargo && creadorCargo === this.currentUserName();
+    if (!esCreador) return false;
+
+    // Regla estricta: Ninguna fila debe tener registros de retorno
+    if (this.cargoTieneDevoluciones(cargo)) return false;
+
+    return true;
+  },
+
+  // 3. Permiso para añadir salidas (LLEVA) vs retornos (DEVUELVE) en "Ítem Extra"
+  canAddSalidaExtra(cargo) {
+    if (!AppState.user || !cargo) return false;
+    if (this.isAdmin()) return true;
+    return this.norm(cargo.gestor) === this.currentUserName();
+  }
+};
+
+// ==========================================
 // 2. SEGURIDAD, TEMA Y ARRANQUE DEL MOTOR
 // ==========================================
 window.addEventListener('message', (event) => {
@@ -848,6 +911,7 @@ async function handleFormSubmit(e) {
       area,
       firma: firmaComprimida,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
+      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR',
       gestorCorreo: AppState.user ? AppState.user.usuario : 'almacenpt@lagenovesa.com.pe',
       materiales: materialesPayload
     }
@@ -1405,7 +1469,8 @@ document.getElementById("btnGuardarExtraModal")?.addEventListener("click", async
       devuelve,
       emisor: emisorActual,
       responsable: responsableId,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador'
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
+      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
     }
   });
 
@@ -1501,7 +1566,8 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
       idDetalle,
       lleva: nuevoLleva,
       devuelve: nuevoDevuelve,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador'
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
+      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
     }
   });
 
@@ -1544,7 +1610,8 @@ window.eliminarLineaDetalle = async function (idCargo, idDetalle, nombreMaterial
     data: {
       idCargo,
       idDetalle,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador'
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
+      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
     }
   });
 
@@ -1574,7 +1641,8 @@ window.eliminarCargoCompleto = async function (idCargo) {
   await SyncEngine.enqueueMutation('deleteCargo', {
     data: {
       idCargo,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador'
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
+      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
     }
   });
 
@@ -1618,7 +1686,22 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
 
   cargoActualModalId = cargo.idCargo;
   const btnDelCargo = document.getElementById("btnEliminarCargoModal");
-  if (btnDelCargo) btnDelCargo.onclick = () => eliminarCargoCompleto(cargo.idCargo);
+  if (btnDelCargo) {
+    const puedeBorrarCargo = AuthRules.canDeleteCargo(cargo);
+    btnDelCargo.classList.toggle("hidden", !puedeBorrarCargo);
+    btnDelCargo.onclick = puedeBorrarCargo ? () => eliminarCargoCompleto(cargo.idCargo) : null;
+  }
+
+  // Controlar si el receptor puede añadir "Salida (LLEVA)" o solo "Retorno (DEVUELVE)"
+  const selExtraTipo = document.getElementById("selExtraTipo");
+  if (selExtraTipo) {
+    const optLleva = selExtraTipo.querySelector('option[value="LLEVA"]');
+    if (optLleva) {
+      const puedeAgregarSalida = AuthRules.canAddSalidaExtra(cargo);
+      optLleva.disabled = !puedeAgregarSalida;
+      if (!puedeAgregarSalida) selExtraTipo.value = "DEVUELVE";
+    }
+  }
 
   // Ocultar panel extra al abrir un cargo
   document.getElementById("panelAddExtraModal")?.classList.add("hidden");
@@ -1684,6 +1767,20 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
   // 1. Renderizado Tabla Escritorio (Desktop) con acciones rápidas de Edición y Eliminación
   const tablaHTML = detallesProcesados.map((det) => {
     const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, '"');
+    const puedeEditarFila = AuthRules.canModifyLinea(cargo, det);
+    const botonesAccionFilaDesktop = puedeEditarFila ? `
+    <div class="flex items-center gap-1 shrink-0">
+      <button type="button" onclick="corregirLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', ${det.lleva}, ${det.devuelve})"
+        title="Corregir cantidades"
+        class="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+      </button>
+      <button type="button" onclick="eliminarLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', '${safeName}')"
+        title="Eliminar línea"
+        class="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+      </button>
+    </div>` : `<span class="text-[10px] text-gray-400 dark:text-gray-500 font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800/80" title="Solo editable por el emisor sin retornos o Administrador">🔒</span>`;
     return `
     <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${det.deuda <= 0 ? "opacity-75 bg-gray-50/70 dark:bg-gray-900/30" : ""} ${det.MATERIAL === highlightMaterialId ? "bg-blue-50/80 dark:bg-blue-900/25 ring-1 ring-inset ring-blue-500/40" : ""}">
       <td class="px-4 py-3.5 text-gray-600 dark:text-gray-400 font-medium">${det.nombreDestino}</td>
@@ -1729,6 +1826,20 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
   // 2. Renderizado Tarjetas Táctiles (Móvil) con edición y eliminación
   const cardsMobileHTML = detallesProcesados.map((det) => {
     const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, '"');
+    const puedeEditarFila = AuthRules.canModifyLinea(cargo, det);
+    const botonesAccionFilaDesktop = puedeEditarFila ? `
+    <div class="flex items-center gap-1 shrink-0">
+      <button type="button" onclick="corregirLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', ${det.lleva}, ${det.devuelve})"
+        title="Corregir cantidades"
+        class="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+      </button>
+      <button type="button" onclick="eliminarLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', '${safeName}')"
+        title="Eliminar línea"
+        class="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+      </button>
+    </div>` : `<span class="text-[10px] text-gray-400 dark:text-gray-500 font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800/80" title="Solo editable por el emisor sin retornos o Administrador">🔒</span>`;
     return `
     <div class="pt-3 first:pt-0 ${det.deuda <= 0 ? "opacity-75" : ""}">
       <div class="flex justify-between items-start gap-2 mb-2">
@@ -1886,7 +1997,8 @@ async function procesarLiquidacionModal(idCargo) {
 
   await SyncEngine.enqueueMutation('updateDevolucion', {
     data: payloadDevolucion,
-    gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido'
+    gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
+    gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
   });
 
   cerrarDetalle();
@@ -1996,7 +2108,8 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
       idDetalle,
       lleva: nuevoLleva,
       devuelve: nuevoDevuelve,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador'
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
+      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
     }
   });
 
@@ -2047,7 +2160,8 @@ window.eliminarLineaDetalle = async function (idCargo, idDetalle, nombreMaterial
     data: {
       idCargo,
       idDetalle,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador'
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
+      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
     }
   });
 
@@ -2085,7 +2199,8 @@ window.eliminarCargoCompleto = async function (idCargo) {
   await SyncEngine.enqueueMutation('deleteCargo', {
     data: {
       idCargo,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador'
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
+      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
     }
   });
 
