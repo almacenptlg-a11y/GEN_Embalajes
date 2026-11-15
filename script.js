@@ -60,12 +60,20 @@ const AuthRules = {
 
   isAdmin() {
     if (!AppState.user) return false;
-    const rol = this.norm(AppState.user.rol || AppState.user.perfil || AppState.user.nivel);
-    return ['ADMIN', 'ADMINISTRADOR', 'SUPERADMIN', 'SISTEMAS'].includes(rol);
+    const rawRol = AppState.user.rol || AppState.user.role || AppState.user.perfil || AppState.user.nivel || AppState.user.tipo || AppState.user.cargo || '';
+    const rol = this.norm(rawRol);
+    if (['ADMIN', 'ADMINISTRADOR', 'SUPERADMIN', 'SISTEMAS', 'TI', 'JEFE'].includes(rol)) return true;
+    if (AppState.user.isAdmin === true || AppState.user.admin === true) return true;
+    return false;
   },
 
   currentUserName() {
     return this.norm(AppState.user?.nombre);
+  },
+
+  currentUserRole() {
+    if (!AppState.user) return 'OPERADOR';
+    return AppState.user.rol || AppState.user.role || AppState.user.perfil || AppState.user.nivel || 'OPERADOR';
   },
 
   // Verifica si el cargo tiene al menos 1 unidad devuelta en cualquiera de sus filas
@@ -896,6 +904,7 @@ async function handleFormSubmit(e) {
       DESTINO: i.destinoId,
       MATERIAL: i.materialId,
       EMISOR: area,
+      'GESTOR CARGO': AppState.user ? AppState.user.nombre : 'Operador Local',
       RESPONSABLE: chofer
     }))
   };
@@ -1679,6 +1688,7 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
         DESTINO: h.destino,
         MATERIAL: h.material,
         EMISOR: h.emisor,
+        'GESTOR CARGO': h.gestorCargo,
         RESPONSABLE: idChoferLimpio
       }))
     };
@@ -1764,115 +1774,100 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
     `;
   }
 
-  // 1. Renderizado Tabla Escritorio (Desktop) con acciones rápidas de Edición y Eliminación
+  // 1. Renderizado Tabla Escritorio (Desktop) con RBAC/ABAC aplicado
   const tablaHTML = detallesProcesados.map((det) => {
     const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, '"');
     const puedeEditarFila = AuthRules.canModifyLinea(cargo, det);
-    const botonesAccionFilaDesktop = puedeEditarFila ? `
-    <div class="flex items-center gap-1 shrink-0">
-      <button type="button" onclick="corregirLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', ${det.lleva}, ${det.devuelve})"
-        title="Corregir cantidades"
-        class="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-      </button>
-      <button type="button" onclick="eliminarLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', '${safeName}')"
-        title="Eliminar línea"
-        class="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-      </button>
-    </div>` : `<span class="text-[10px] text-gray-400 dark:text-gray-500 font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800/80" title="Solo editable por el emisor sin retornos o Administrador">🔒</span>`;
+
+    const botonesAccionDesktop = puedeEditarFila ? `
+      <div class="flex items-center gap-1 shrink-0">
+        <button type="button" onclick="corregirLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', ${det.lleva}, ${det.devuelve})"
+          title="Corregir cantidades (Lleva / Devuelto)"
+          class="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+        </button>
+        <button type="button" onclick="eliminarLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', '${safeName}')"
+          title="Eliminar línea"
+          class="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+        </button>
+      </div>` : `
+      <span class="text-[10px] text-gray-400 dark:text-gray-500 font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800/80 shrink-0 select-none"
+        title="Bloqueado: Solo el emisor original (sin retornos) o un Administrador puede modificar esta línea">🔒</span>`;
+
     return `
-    <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${det.deuda <= 0 ? "opacity-75 bg-gray-50/70 dark:bg-gray-900/30" : ""} ${det.MATERIAL === highlightMaterialId ? "bg-blue-50/80 dark:bg-blue-900/25 ring-1 ring-inset ring-blue-500/40" : ""}">
-      <td class="px-4 py-3.5 text-gray-600 dark:text-gray-400 font-medium">${det.nombreDestino}</td>
-      <td class="px-4 py-3.5">
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <div class="${det.deuda <= 0 ? "text-gray-600 dark:text-gray-400" : "text-gray-900 dark:text-gray-100"} font-bold">${det.nombreMaterial}</div>
-            <div class="text-[11px] text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${det.deuda <= 0 ? "opacity-75 bg-gray-50/70 dark:bg-gray-900/30" : ""} ${det.MATERIAL === highlightMaterialId ? "bg-blue-50/80 dark:bg-blue-900/25 ring-1 ring-inset ring-blue-500/40" : ""}">
+        <td class="px-4 py-3.5 text-gray-600 dark:text-gray-400 font-medium">${det.nombreDestino}</td>
+        <td class="px-4 py-3.5">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="${det.deuda <= 0 ? "text-gray-600 dark:text-gray-400" : "text-gray-900 dark:text-gray-100"} font-bold">${det.nombreMaterial}</div>
+              <div class="text-[11px] text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
+            </div>
+            ${botonesAccionDesktop}
           </div>
-          <div class="flex items-center gap-1 shrink-0">
-            <button type="button" onclick="corregirLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', ${det.lleva}, ${det.devuelve})"
-              title="Corregir cantidades (Lleva / Devuelto)"
-              class="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-            </button>
-            <button type="button" onclick="eliminarLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', '${safeName}')"
-              title="Eliminar registro errado"
-              class="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-            </button>
-          </div>
-        </div>
-      </td>
-      <td class="px-4 py-3.5">
-         <div class="flex items-center justify-center gap-3 text-xs bg-gray-50 dark:bg-gray-800/80 rounded-xl p-2 border border-gray-200 dark:border-gray-700 w-max mx-auto">
-            <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Lleva</span><span class="text-gray-900 dark:text-white font-black text-sm">${det.lleva}</span></div>
-            <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
-            <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Devuelto</span><span class="text-emerald-600 dark:text-emerald-400 font-black text-sm">${det.devuelve}</span></div>
-            <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
-            <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Deuda</span><span class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-500"} font-black text-sm">${det.deuda}</span></div>
-         </div>
-      </td>
-      <td class="px-4 py-3.5 w-32">
-        <input type="number" min="0" max="${Math.max(0, det.deuda)}" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
-               class="w-full bg-white dark:bg-gray-950 border-2 border-gray-300 dark:border-gray-700 rounded-xl p-2 text-center text-base text-emerald-600 dark:text-emerald-400 font-black focus:border-emerald-500 outline-none mdl-return-input mdl-input-desktop transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50"
-               ${det.deuda <= 0 ? "disabled" : ""}>
-      </td>
-    </tr>
-  `;
+        </td>
+        <td class="px-4 py-3.5">
+           <div class="flex items-center justify-center gap-3 text-xs bg-gray-50 dark:bg-gray-800/80 rounded-xl p-2 border border-gray-200 dark:border-gray-700 w-max mx-auto">
+              <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Lleva</span><span class="text-gray-900 dark:text-white font-black text-sm">${det.lleva}</span></div>
+              <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
+              <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Devuelto</span><span class="text-emerald-600 dark:text-emerald-400 font-black text-sm">${det.devuelve}</span></div>
+              <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
+              <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Deuda</span><span class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-500"} font-black text-sm">${det.deuda}</span></div>
+           </div>
+        </td>
+        <td class="px-4 py-3.5 w-32">
+          <input type="number" min="0" max="${Math.max(0, det.deuda)}" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
+                 class="w-full bg-white dark:bg-gray-950 border-2 border-gray-300 dark:border-gray-700 rounded-xl p-2 text-center text-base text-emerald-600 dark:text-emerald-400 font-black focus:border-emerald-500 outline-none mdl-return-input mdl-input-desktop transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50"
+                 ${det.deuda <= 0 ? "disabled" : ""}>
+        </td>
+      </tr>
+    `;
   }).join("");
   document.getElementById("mdlTablaMateriales").innerHTML = tablaHTML;
 
-  // 2. Renderizado Tarjetas Táctiles (Móvil) con edición y eliminación
+  // 2. Renderizado Tarjetas Táctiles (Móvil) con RBAC/ABAC aplicado
   const cardsMobileHTML = detallesProcesados.map((det) => {
     const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, '"');
     const puedeEditarFila = AuthRules.canModifyLinea(cargo, det);
-    const botonesAccionFilaDesktop = puedeEditarFila ? `
-    <div class="flex items-center gap-1 shrink-0">
-      <button type="button" onclick="corregirLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', ${det.lleva}, ${det.devuelve})"
-        title="Corregir cantidades"
-        class="p-1.5 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-      </button>
-      <button type="button" onclick="eliminarLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', '${safeName}')"
-        title="Eliminar línea"
-        class="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-      </button>
-    </div>` : `<span class="text-[10px] text-gray-400 dark:text-gray-500 font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800/80" title="Solo editable por el emisor sin retornos o Administrador">🔒</span>`;
+
+    const botonesAccionMobile = puedeEditarFila ? `
+      <div class="flex items-center gap-1 shrink-0">
+        <button type="button" onclick="corregirLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', ${det.lleva}, ${det.devuelve})"
+          class="p-1.5 text-gray-500 hover:text-blue-600 bg-gray-100 dark:bg-gray-800 rounded-lg">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+        </button>
+        <button type="button" onclick="eliminarLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', '${safeName}')"
+          class="p-1.5 text-gray-500 hover:text-red-600 bg-gray-100 dark:bg-gray-800 rounded-lg">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+        </button>
+      </div>` : `
+      <span class="text-[10px] text-gray-400 dark:text-gray-500 font-mono px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 shrink-0 select-none">🔒</span>`;
+
     return `
-    <div class="pt-3 first:pt-0 ${det.deuda <= 0 ? "opacity-75" : ""}">
-      <div class="flex justify-between items-start gap-2 mb-2">
-        <div>
-          <span class="text-[10px] font-bold uppercase text-blue-600 dark:text-blue-400">${det.nombreDestino}</span>
-          <h5 class="text-sm font-bold text-gray-900 dark:text-white leading-snug">${det.nombreMaterial}</h5>
-          <span class="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">${det.m3Llevado.toFixed(3)} m³</span>
+      <div class="pt-3 first:pt-0 ${det.deuda <= 0 ? "opacity-75" : ""}">
+        <div class="flex justify-between items-start gap-2 mb-2">
+          <div>
+            <span class="text-[10px] font-bold uppercase text-blue-600 dark:text-blue-400">${det.nombreDestino}</span>
+            <h5 class="text-sm font-bold text-gray-900 dark:text-white leading-snug">${det.nombreMaterial}</h5>
+            <span class="text-[11px] font-mono text-emerald-600 dark:text-emerald-400">${det.m3Llevado.toFixed(3)} m³</span>
+          </div>
+          ${botonesAccionMobile}
         </div>
-        <div class="flex items-center gap-1 shrink-0">
-          <button type="button" onclick="corregirLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', ${det.lleva}, ${det.devuelve})"
-            class="p-1.5 text-gray-500 hover:text-blue-600 bg-gray-100 dark:bg-gray-800 rounded-lg">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-          </button>
-          <button type="button" onclick="eliminarLineaDetalle('${cargo.idCargo}', '${det.ID_DETALLE}', '${safeName}')"
-            class="p-1.5 text-gray-500 hover:text-red-600 bg-gray-100 dark:bg-gray-800 rounded-lg">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-          </button>
-        </div>
-      </div>
-      <div class="flex items-center justify-between gap-3 bg-gray-50 dark:bg-gray-800/70 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700">
-        <div class="flex items-center gap-3 text-xs">
-          <div><span class="text-[9px] text-gray-500 block uppercase">Lleva</span><strong class="text-gray-900 dark:text-white text-sm">${det.lleva}</strong></div>
-          <div><span class="text-[9px] text-gray-500 block uppercase">Dev.</span><strong class="text-emerald-600 dark:text-emerald-400 text-sm">${det.devuelve}</strong></div>
-          <div><span class="text-[9px] text-gray-500 block uppercase">Deuda</span><strong class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600" : "text-gray-500"} text-sm">${det.deuda}</strong></div>
-        </div>
-        <div class="w-24 shrink-0">
-          <input type="number" min="0" max="${Math.max(0, det.deuda)}" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "Retorna"}"
-                 class="w-full bg-white dark:bg-gray-950 border-2 border-gray-300 dark:border-gray-600 rounded-xl p-2 text-center text-base text-emerald-600 dark:text-emerald-400 font-black focus:border-emerald-500 outline-none mdl-return-input mdl-input-mobile disabled:opacity-50"
-                 ${det.deuda <= 0 ? "disabled" : ""}>
+        <div class="flex items-center justify-between gap-3 bg-gray-50 dark:bg-gray-800/70 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700">
+          <div class="flex items-center gap-3 text-xs">
+            <div><span class="text-[9px] text-gray-500 block uppercase">Lleva</span><strong class="text-gray-900 dark:text-white text-sm">${det.lleva}</strong></div>
+            <div><span class="text-[9px] text-gray-500 block uppercase">Dev.</span><strong class="text-emerald-600 dark:text-emerald-400 text-sm">${det.devuelve}</strong></div>
+            <div><span class="text-[9px] text-gray-500 block uppercase">Deuda</span><strong class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600" : "text-gray-500"} text-sm">${det.deuda}</strong></div>
+          </div>
+          <div class="w-24 shrink-0">
+            <input type="number" min="0" max="${Math.max(0, det.deuda)}" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "Retorna"}"
+                   class="w-full bg-white dark:bg-gray-950 border-2 border-gray-300 dark:border-gray-600 rounded-xl p-2 text-center text-base text-emerald-600 dark:text-emerald-400 font-black focus:border-emerald-500 outline-none mdl-return-input mdl-input-mobile disabled:opacity-50"
+                   ${det.deuda <= 0 ? "disabled" : ""}>
+          </div>
         </div>
       </div>
-    </div>
-  `;
+    `;
   }).join("");
   document.getElementById("mdlCardsMaterialesMobile").innerHTML = cardsMobileHTML;
 
