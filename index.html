@@ -253,16 +253,20 @@
       </div>
     </section>
 
-    <!-- ==========================================
-         MODAL DETALLE DE CARGO Y LIQUIDACIÓN
+  <!-- ==========================================
+         MODAL DETALLE DE CARGO, AUDITORÍA Y LIQUIDACIÓN 1-TAP
          ========================================== -->
     <div id="modalDetalle" class="fixed inset-0 z-50 hidden flex justify-center items-center bg-black/60 backdrop-blur-sm transition-opacity duration-300 opacity-0">
       <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl rounded-2xl w-[95%] max-w-7xl max-h-[90vh] flex flex-col overflow-hidden transform scale-95 transition-transform duration-300" id="modalDetalleContent">
 
         <div class="flex justify-between items-center px-6 py-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50">
-          <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            Cargo: <span id="mdlTitleCargo" class="font-mono text-emerald-600 dark:text-emerald-400">--</span>
-          </h3>
+          <div class="flex items-center gap-3 flex-wrap">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              Cargo: <span id="mdlTitleCargo" class="font-mono text-emerald-600 dark:text-emerald-400">--</span>
+            </h3>
+            <!-- Badge SLA Antigüedad -->
+            <span id="mdlBadgeSLA"></span>
+          </div>
           <div class="flex items-center gap-3">
             <button type="button" id="btnPrintModal" title="Imprimir / Descargar PDF" class="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-800 rounded-lg transition-colors">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
@@ -276,27 +280,39 @@
         <div class="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50/50 dark:bg-gray-800/30">
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
+            <!-- COLUMNA 1: VEHÍCULO + GESTOR + FIRMA DE AUDITORÍA -->
             <div class="lg:col-span-3 flex flex-col gap-4">
-              <div class="relative rounded-xl overflow-hidden shadow-md border border-gray-200 dark:border-gray-700 h-64 lg:h-80 group bg-gray-100 dark:bg-gray-800">
+              <div class="relative rounded-xl overflow-hidden shadow-md border border-gray-200 dark:border-gray-700 h-56 lg:h-64 group bg-gray-100 dark:bg-gray-800">
                 <img id="imgVehiculoModal" src="" alt="Vehículo" class="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-700">
                 <div class="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/60 to-transparent"></div>
-                <div class="absolute bottom-0 left-0 p-5 w-full">
-                  <h4 id="mdlChofer" class="text-xl font-extrabold text-white leading-tight mb-1">Nombre Chofer</h4>
-                  <p id="mdlPlaca" class="text-sm font-mono font-semibold text-gray-300 mb-3 bg-black/40 w-fit px-2 py-1 rounded border border-gray-600">Z6R-827 Isuzu</p>
+                <div class="absolute bottom-0 left-0 p-4 w-full">
+                  <h4 id="mdlChofer" class="text-lg font-extrabold text-white leading-tight mb-1">Nombre Chofer</h4>
+                  <p id="mdlPlaca" class="text-xs font-mono font-semibold text-gray-300 mb-2 bg-black/40 w-fit px-2 py-1 rounded border border-gray-600">Z6R-827 Isuzu</p>
                   <div id="mdlBadgeDeuda"></div>
                 </div>
               </div>
-              <div class="bg-white dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 p-4 rounded-xl shadow-sm">
-                <p class="text-xs text-gray-500 uppercase font-bold mb-1">Gestor de Emisión</p>
-                <p id="mdlGestor" class="text-sm text-gray-800 dark:text-gray-300 truncate">No registrado</p>
+
+              <div class="bg-white dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 p-4 rounded-xl shadow-sm space-y-3">
+                <div>
+                  <p class="text-[10px] text-gray-500 uppercase font-bold mb-0.5">Gestor de Emisión</p>
+                  <p id="mdlGestor" class="text-xs font-semibold text-gray-800 dark:text-gray-300 truncate">No registrado</p>
+                </div>
+                <!-- Visor de Firma Digital Capturada -->
+                <div id="mdlFirmaContainer" class="border-t border-gray-200 dark:border-gray-700 pt-2.5 hidden">
+                  <p class="text-[10px] text-gray-500 uppercase font-bold mb-1.5">Firma Conformidad Salida</p>
+                  <div class="bg-white rounded-lg border border-gray-300 p-2 flex justify-center items-center h-20">
+                    <img id="mdlImgFirma" src="" alt="Firma Chofer" class="max-h-16 object-contain">
+                  </div>
+                </div>
               </div>
             </div>
 
+            <!-- COLUMNA 2: METADATOS DEL DESPACHO -->
             <div class="lg:col-span-4 flex flex-col gap-4">
               <div class="bg-white dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 p-5 rounded-xl h-full shadow-sm">
-                <div class="grid grid-cols-3 gap-y-6 text-sm">
-                  <div class="col-span-1 text-gray-500">Hora</div>
-                  <div class="col-span-2 text-gray-800 dark:text-gray-200 font-mono" id="mdlHora">--</div>
+                <div class="grid grid-cols-3 gap-y-5 text-sm">
+                  <div class="col-span-1 text-gray-500">Hora Salida</div>
+                  <div class="col-span-2 text-gray-800 dark:text-gray-200 font-mono text-xs" id="mdlHora">--</div>
                   <div class="col-span-1 text-gray-500">Despachó</div>
                   <div class="col-span-2 text-gray-800 dark:text-gray-200 font-bold" id="mdlDespacho">Almacén PT</div>
                   <div class="col-span-1 text-gray-500">Destinos <span id="mdlDestinosCount" class="text-xs bg-gray-200 dark:bg-gray-700 px-1.5 rounded-full">(0)</span></div>
@@ -307,29 +323,40 @@
               </div>
             </div>
 
+            <!-- COLUMNA 3: TABLA DE LIQUIDACIÓN RÁPIDA -->
             <div class="lg:col-span-5 flex flex-col">
               <div class="bg-white dark:bg-gray-900/80 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm flex-1 flex flex-col">
-                <div class="bg-gray-100 dark:bg-gray-800/80 px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                  <h4 class="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2">
-                    Total de materiales: <span id="mdlTotalMateriales" class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white px-2 py-0.5 rounded text-sm">0</span>
+                <div class="bg-gray-100 dark:bg-gray-800/80 px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-wrap justify-between items-center gap-2">
+                  <h4 class="font-bold text-gray-800 dark:text-gray-200 flex items-center gap-2 text-xs md:text-sm">
+                    Total: <span id="mdlTotalMateriales" class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white px-2 py-0.5 rounded text-sm">0</span>
                   </h4>
+                  <!-- Acción 1-Tap: Autollenar 100% de deuda -->
+                  <button type="button" id="btnAutollenarTodo" onclick="autollenarDevolucionTotal()" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:scale-95 text-white shadow-sm transition-all flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Devolver Todo (100%)
+                  </button>
                 </div>
-                <div class="flex-1 overflow-y-auto max-h-[400px]">
+
+                <div class="flex-1 overflow-y-auto max-h-[380px]">
                   <table class="w-full text-left text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
                     <thead class="bg-gray-50 dark:bg-gray-900 sticky top-0 border-b border-gray-200 dark:border-gray-700 uppercase font-semibold text-gray-500 z-10">
                       <tr>
                         <th class="px-3 py-3">Destino</th>
                         <th class="px-3 py-3">Material</th>
                         <th class="px-3 py-3 text-center">Movimientos</th>
-                        <th class="px-3 py-3 text-center w-24">Retorna</th>
+                        <th class="px-3 py-3 text-center w-28">Retorna</th>
                       </tr>
                     </thead>
                     <tbody id="mdlTablaMateriales" class="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-transparent">
                     </tbody>
                   </table>
                 </div>
-                <div class="bg-gray-50 dark:bg-gray-900 px-4 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
-                  <button type="button" id="btnLiquidarModal" class="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg font-bold transition-all shadow-lg flex items-center justify-center gap-2">
+
+                <div class="bg-gray-50 dark:bg-gray-900 px-4 py-3.5 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center gap-3">
+                  <button type="button" onclick="limpiarInputsLiquidacion()" class="text-xs font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 px-3 py-2 rounded-lg transition-colors">
+                    Limpiar
+                  </button>
+                  <button type="button" id="btnLiquidarModal" class="flex-1 sm:flex-none px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-lg font-bold transition-all shadow-lg flex items-center justify-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
                     Guardar Liquidación
                   </button>
@@ -341,7 +368,6 @@
         </div>
       </div>
     </div>
-
     <!-- ==========================================
          ALERTA CRÍTICA (SOLO VALIDACIONES DE USUARIO)
          ========================================== -->
