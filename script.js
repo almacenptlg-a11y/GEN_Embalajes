@@ -83,8 +83,8 @@ const AuthRules = {
 
     const rol = this.norm(this.extractRawRole());
     if (!rol) return false;
-
-    const adminKeywords = ['ADMIN', 'ADMINISTRADOR', 'SUPERADMIN', 'SISTEMAS', 'TI', 'JEFE', 'GERENTE', 'SUPERVISOR'];
+//TIPOS DE ROLES ADMITIDOS PARA EDICION TOTAL DE LOS DATOS
+    const adminKeywords = ['ADMIN', 'ADMINISTRADOR'];
     return adminKeywords.some(k => rol === k || rol.includes(k));
   },
 
@@ -95,7 +95,7 @@ const AuthRules = {
   currentUserRole() {
     if (this.isAdmin()) return 'ADMIN';
     const raw = this.norm(this.extractRawRole());
-    return raw || 'OPERADOR';
+    return raw || 'OPERARIO';
   },
 
   cargoTieneDevoluciones(cargo) {
