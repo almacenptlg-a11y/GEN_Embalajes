@@ -1,6 +1,6 @@
 /**
  * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics)
- * @security Protocolo Zero-Trust | Iframe Enforcer | Token Auth | Dual Theme
+ * @architecture Zero-Trust | Offline-First | Optimistic UI (O(1)) | Dual Theme
  */
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-QJ6RZdmQw3gJIt80Y6f4iTKyS7BqhXrgHTGWrO0PiSj4m/exec";
@@ -10,7 +10,7 @@ const DOMINIO_HUB_PERMITIDO = [
     "https://almacenptlg-a11y.github.io",
     "http://localhost:3000",
     "http://127.0.0.1:3000"
-]; // Cambia al dominio raíz de tu HUB
+];
 
 const AppState = {
   user: null,               
@@ -22,6 +22,7 @@ const AppState = {
   cargosActivos: [],
   sortConfig: { key: "fecha", asc: false },
   historial: [],
+  historialFiltrado: [],
   sortHistoryConfig: { key: "horaCargo", asc: false } 
 };
 
@@ -42,13 +43,13 @@ if (window === window.top) {
 }
 
 // ==========================================
-// 2. SEGURIDAD Y GESTIÓN DE TEMA (INTEGRACIÓN HUB)
+// 2. SEGURIDAD, TEMA Y ARRANQUE DEL MOTOR
 // ==========================================
 window.addEventListener('message', (event) => {
     if (!DOMINIO_HUB_PERMITIDO.includes(event.origin)) {
-    console.warn("Bloqueo de seguridad:", event.origin);
-    return;
-}
+        console.warn("Bloqueo de seguridad:", event.origin);
+        return;
+    }
 
     const { type, user, theme } = event.data || {};
     
@@ -58,10 +59,8 @@ window.addEventListener('message', (event) => {
 
     if (type === 'SESSION_SYNC' && user) {
         document.documentElement.classList.toggle('dark', theme === 'dark');
-        
         AppState.user = user;
         AppState.isSessionVerified = true;
-        
         actualizarUIUsuario();
         
         if (AppState.datos.choferes.length === 0) {
@@ -70,15 +69,24 @@ window.addEventListener('message', (event) => {
     }
 });
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // Inicializar Motor IndexedDB y Worker en segundo plano
+    await SyncEngine.init({
+        apiUrl: API_URL,
+        token: API_SECRET_TOKEN,
+        onQueueChange: actualizarBadgeSync,
+        onRemoteDataSync: handleRemoteSyncUpdate,
+        onSyncError: (msg) => mostrarToast(`Error de sincronización: ${msg}`, 'error')
+    });
+
     window.parent.postMessage({ type: 'MODULO_LISTO' }, '*');
     
     setTimeout(() => {
         if (!AppState.isSessionVerified) {
             const statusDiv = document.getElementById('status-indicator');
             if(statusDiv) {
-                statusDiv.innerHTML = '<i class="text-red-500">⚠️</i> Acceso Restringido';
-                statusDiv.className = "flex items-center gap-2 text-sm text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-400/10 px-3 py-1.5 rounded-full border border-red-200 dark:border-red-400/20 backdrop-blur-md";
+                statusDiv.innerHTML = '⚠️ Acceso Restringido';
+                statusDiv.className = "flex items-center gap-2 text-xs font-semibold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-400/10 px-3.5 py-1.5 rounded-full border border-red-200 dark:border-red-400/20 backdrop-blur-md";
             }
             const btnSubmit = document.getElementById('btnSubmit');
             if(btnSubmit) btnSubmit.disabled = true;
@@ -88,65 +96,153 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function actualizarUIUsuario() {
     if(!AppState.user) return;
-    
     const statusDiv = document.getElementById('status-indicator');
     if (statusDiv) {
-        statusDiv.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 mr-1"></span> ${AppState.user.nombre} | ${AppState.user.area}`;
-        statusDiv.className = "flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3 py-1.5 rounded-full border border-emerald-200 dark:border-emerald-400/20 backdrop-blur-md";
+        statusDiv.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> ${AppState.user.nombre} | ${AppState.user.area}`;
+        statusDiv.className = "flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3.5 py-1.5 rounded-full border border-emerald-200 dark:border-emerald-400/20 backdrop-blur-md";
     }
-
     const btnSubmit = document.getElementById('btnSubmit');
     if(btnSubmit) btnSubmit.disabled = false;
 }
 
 // ==========================================
-// 3. INICIALIZACIÓN
+// 3. UI DE SINCRONIZACIÓN TIPO APPSHEET
 // ==========================================
-async function initApp() {
-  try {
-    const res = await fetch(`${API_URL}?action=getInitData&token=${API_SECRET_TOKEN}`, { method: "GET", redirect: "follow" });
-    if (!res.ok) throw new Error(`Error de Servidor: Código ${res.status}`);
+function actualizarBadgeSync(pendingCount, isOnline) {
+    const badgeDesktop = document.getElementById('sync-badge');
+    const iconDesktop = document.getElementById('sync-icon');
+    const textDesktop = document.getElementById('sync-text');
+    const btnMobile = document.getElementById('btnSyncMobile');
 
-    const json = await res.json();
-    if (json.status === "error") throw new Error(`El servidor devolvió: ${json.message}`);
+    if (!badgeDesktop || !btnMobile) return;
 
-    AppState.datos = json.data;
+    if (!isOnline) {
+        // Estado Offline
+        badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-500/30";
+        iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3"></path>`;
+        iconDesktop.classList.remove('animate-spin-sync');
+        textDesktop.textContent = pendingCount > 0 ? `Offline (${pendingCount} en cola)` : `Modo Offline`;
 
-    AppState.datos.areas = AppState.datos.destinos.filter((destino) => {
-      return destino.EMISOR && String(destino.EMISOR).trim().toUpperCase() === "SI";
-    });
+        btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/20";
+        btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500"></span><span>Offline${pendingCount > 0 ? ` (${pendingCount})` : ''}</span>`;
+    } else if (pendingCount > 0) {
+        // Sincronizando en segundo plano
+        badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-500/30";
+        iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>`;
+        iconDesktop.classList.add('animate-spin-sync');
+        textDesktop.textContent = `Sincronizando (${pendingCount})...`;
 
-    AppState.datos.vehiculos = AppState.datos.vehiculos.map(v => {
-      v.DISPLAY_NAME = `${v.PLACA} ${v.MARCA || ''}`.trim();
-      return v;
-    });
+        btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-500/20";
+        btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span><span>Subiendo (${pendingCount})</span>`;
+    } else {
+        // Todo al día
+        badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 hover:opacity-80";
+        iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>`;
+        iconDesktop.classList.remove('animate-spin-sync');
+        textDesktop.textContent = `Sincronizado`;
 
-    construirUI();
-    initSignaturePad();
-    
-  } catch (err) {
-    const statusDiv = document.getElementById('status-indicator');
-    if(statusDiv) {
-        statusDiv.innerHTML = "Error Interno";
-        statusDiv.className = "flex items-center gap-2 text-sm text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-400/10 px-3 py-1.5 rounded-full border border-red-200 dark:border-red-400/20 backdrop-blur-md";
+        btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20";
+        btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span>Al día</span>`;
     }
-    mostrarAlerta("No se pudo descargar la BD. " + err.message, "error", "Error Crítico");
-  }
+}
+
+function handleRemoteSyncUpdate({ cargosActivos, historial }) {
+    if (cargosActivos) {
+        AppState.cargosActivos = cargosActivos.map(cargo => ({
+            ...cargo,
+            _horaSort: estandarizarFecha(cargo.hora)
+        }));
+        if (!document.getElementById('viewDescargo').classList.contains('hidden')) {
+            renderizarCargosFiltrados();
+        }
+    }
+    if (historial) {
+        AppState.historial = historial;
+        if (!document.getElementById('viewHistorico').classList.contains('hidden')) {
+            renderizarHistorico();
+        }
+    }
 }
 
 // ==========================================
-// MOTOR DE FIRMA DIGITAL (CANVAS)
+// 4. INICIALIZACIÓN (STALE-WHILE-REVALIDATE)
+// ==========================================
+async function initApp() {
+  // Paso A: Hidratación instantánea (0ms) desde IndexedDB
+  const cachedMaestros = await SyncEngine.getCache('maestros');
+  const cachedCargos = await SyncEngine.getCache('cargosActivos');
+  const cachedHistorial = await SyncEngine.getCache('historial');
+
+  if (cachedMaestros) {
+      procesarMaestrosEnMemoria(cachedMaestros);
+      construirUI();
+      initSignaturePad();
+  }
+  if (cachedCargos) {
+      AppState.cargosActivos = cachedCargos.map(c => ({ ...c, _horaSort: estandarizarFecha(c.hora) }));
+  }
+  if (cachedHistorial) {
+      AppState.historial = cachedHistorial;
+  }
+
+  // Paso B: Actualización silenciosa desde red (Background Revalidate)
+  if (!navigator.onLine) {
+      if (!cachedMaestros) mostrarAlerta("Sin conexión y sin caché local. Conéctate a internet la primera vez.", "error", "Modo Offline");
+      return;
+  }
+
+  try {
+    const res = await fetch(`${API_URL}?action=getInitData&token=${API_SECRET_TOKEN}`, { method: "GET", redirect: "follow" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const json = await res.json();
+    if (json.status === "error") throw new Error(json.message);
+
+    await SyncEngine.saveCache('maestros', json.data);
+    procesarMaestrosEnMemoria(json.data);
+
+    // Si no había caché previo, construir UI ahora
+    if (!cachedMaestros) {
+        construirUI();
+        initSignaturePad();
+    }
+
+    // Pre-cargar datos operativos en segundo plano
+    SyncEngine.pullLatestState();
+    
+  } catch (err) {
+    console.warn("[InitApp] Falló actualización remota, operando con caché local:", err.message);
+    if (!cachedMaestros) {
+        mostrarAlerta("No se pudo descargar la BD inicial: " + err.message, "error", "Error de Red");
+    }
+  }
+}
+
+function procesarMaestrosEnMemoria(rawData) {
+    AppState.datos = rawData;
+    AppState.datos.areas = AppState.datos.destinos.filter(d => d.EMISOR && String(d.EMISOR).trim().toUpperCase() === "SI");
+    AppState.datos.vehiculos = AppState.datos.vehiculos.map(v => ({
+        ...v,
+        DISPLAY_NAME: `${v.PLACA} ${v.MARCA || ''}`.trim()
+    }));
+}
+
+// ==========================================
+// 5. MOTOR DE FIRMA DIGITAL (CANVAS)
 // ==========================================
 let signaturePad, signatureCtx;
 let isDrawing = false;
 let isSignatureEmpty = true;
+let isSignatureInitialized = false;
 
 function initSignaturePad() {
+  if (isSignatureInitialized) return;
   signaturePad = document.getElementById('signaturePad');
   signatureCtx = signaturePad.getContext('2d');
   
   function resizeCanvas() {
     const rect = signaturePad.parentElement.getBoundingClientRect();
+    if (rect.width === 0) return;
     signaturePad.width = rect.width;
     signaturePad.height = rect.height;
     signatureCtx.lineCap = 'round';
@@ -196,16 +292,46 @@ function initSignaturePad() {
   signaturePad.addEventListener('touchend', stopDrawing);
 
   document.getElementById('btnClearSignature').addEventListener('click', limpiarFirma);
+  isSignatureInitialized = true;
 }
 
 function limpiarFirma() {
+  if (!signatureCtx) return;
   signatureCtx.clearRect(0, 0, signaturePad.width, signaturePad.height);
   isSignatureEmpty = true;
 }
 
 // ==========================================
-// SISTEMA DE ALERTAS DUAL-THEME
+// 6. SISTEMA DE NOTIFICACIONES (TOASTS Y ALERTAS)
 // ==========================================
+function mostrarToast(mensaje, tipo = 'success') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    const isError = tipo === 'error';
+    const bgClass = isError 
+        ? 'bg-red-600 text-white border-red-500' 
+        : 'bg-gray-900 dark:bg-gray-800 text-white border-gray-700 dark:border-gray-600';
+    
+    const iconSvg = isError
+        ? `<svg class="w-5 h-5 text-red-200 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`
+        : `<svg class="w-5 h-5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>`;
+
+    toast.className = `pointer-events-auto flex items-center gap-3 px-4 py-3.5 rounded-2xl shadow-2xl border ${bgClass} text-xs font-semibold transform translate-y-4 opacity-0 transition-all duration-300`;
+    toast.innerHTML = `${iconSvg}<span class="leading-snug">${mensaje}</span>`;
+
+    container.appendChild(toast);
+    requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-4', 'opacity-0');
+    });
+
+    setTimeout(() => {
+        toast.classList.add('translate-y-2', 'opacity-0');
+        setTimeout(() => toast.remove(), 300);
+    }, 3500);
+}
+
 function mostrarAlerta(mensaje, tipo = "warning", titulo = "") {
   const modal = document.getElementById("customAlert");
   const content = document.getElementById("customAlertContent");
@@ -215,19 +341,9 @@ function mostrarAlerta(mensaje, tipo = "warning", titulo = "") {
   const btn = document.getElementById("btnAlertClose");
 
   msg.textContent = mensaje;
-  content.className = "bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl rounded-3xl w-[90%] max-w-sm p-8 transform scale-95 transition-transform duration-300 flex flex-col items-center text-center";
-  title.className = "text-xl font-black text-gray-900 dark:text-white mb-2 tracking-tight";
-  msg.className = "text-sm text-gray-600 dark:text-gray-300 mb-8 leading-relaxed";
-
-  if (tipo === "warning" || tipo === "error") {
-    icon.innerHTML = `<div class="w-20 h-20 rounded-full bg-red-50 dark:bg-red-500/10 flex items-center justify-center text-red-600 dark:text-red-500 border-4 border-red-200 dark:border-red-500/20"><svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg></div>`;
-    title.textContent = titulo || "Dato Requerido";
-    btn.className = "w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold transition-all shadow-lg focus:outline-none focus:ring-4 shadow-red-600/30 dark:shadow-red-900/40";
-  } else if (tipo === "success") {
-    icon.innerHTML = `<div class="w-20 h-20 rounded-full bg-emerald-50 dark:bg-emerald-500/10 flex items-center justify-center text-emerald-600 dark:text-emerald-400 border-4 border-emerald-200 dark:border-emerald-500/20"><svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg></div>`;
-    title.textContent = titulo || "¡Operación Exitosa!";
-    btn.className = "w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all shadow-lg focus:outline-none focus:ring-4 shadow-emerald-600/30 dark:shadow-emerald-900/40";
-  }
+  title.textContent = titulo || "Dato Requerido";
+  icon.innerHTML = `<div class="w-16 h-16 rounded-full bg-red-50 dark:bg-red-500/10 flex items-center justify-center text-red-600 dark:text-red-500 border-4 border-red-200 dark:border-red-500/20"><svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg></div>`;
+  btn.className = "w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold transition-all shadow-lg focus:outline-none";
 
   modal.classList.remove("hidden");
   setTimeout(() => {
@@ -246,14 +362,16 @@ window.cerrarAlerta = function () {
 };
 
 // ==========================================
-// AUTOCOMPLETADO DUAL-THEME
+// 7. AUTOCOMPLETADO Y LISTA DE MATERIALES
 // ==========================================
+let isUIBuilt = false;
 function construirUI() {
-  setupAutocomplete("inArea", "hdArea", "listArea", AppState.datos.areas, "REFERENCIA", "ID_DSTN", "inChofer");
-  setupAutocomplete("inChofer", "hdChofer", "listChofer", AppState.datos.choferes, "NOMBRE", "ID_CHFR", "inVehiculo");
-  setupAutocomplete("inVehiculo", "hdVehiculo", "listVehiculo", AppState.datos.vehiculos, "DISPLAY_NAME", "PLACA", "inDestino");
-  setupAutocomplete("inDestino", "hdDestino", "listDestino", AppState.datos.destinos, "REFERENCIA", "ID_DSTN", "inMaterial");
-  setupAutocomplete("inMaterial", "hdMaterial", "listMaterial", AppState.datos.materiales, "DESCRIPCION", "ID_MEMB", "inCantidad");
+  if (isUIBuilt) return;
+  setupAutocomplete("inArea", "hdArea", "listArea", () => AppState.datos.areas, "REFERENCIA", "ID_DSTN", "inChofer");
+  setupAutocomplete("inChofer", "hdChofer", "listChofer", () => AppState.datos.choferes, "NOMBRE", "ID_CHFR", "inVehiculo");
+  setupAutocomplete("inVehiculo", "hdVehiculo", "listVehiculo", () => AppState.datos.vehiculos, "DISPLAY_NAME", "PLACA", "inDestino");
+  setupAutocomplete("inDestino", "hdDestino", "listDestino", () => AppState.datos.destinos, "REFERENCIA", "ID_DSTN", "inMaterial");
+  setupAutocomplete("inMaterial", "hdMaterial", "listMaterial", () => AppState.datos.materiales, "DESCRIPCION", "ID_MEMB", "inCantidad");
 
   document.getElementById("btnSubmit").disabled = false;
   document.getElementById("btnSubmit").addEventListener("click", handleFormSubmit);
@@ -276,9 +394,10 @@ function construirUI() {
       if (!ul.contains(e.target) && e.target.tagName !== "INPUT") ul.classList.add("hidden");
     });
   });
+  isUIBuilt = true;
 }
 
-function setupAutocomplete(inputId, hiddenId, listId, dataArray, displayField, valueField, nextInputId = null) {
+function setupAutocomplete(inputId, hiddenId, listId, getDataFn, displayField, valueField, nextInputId = null) {
   const input = document.getElementById(inputId);
   const hidden = document.getElementById(hiddenId);
   const list = document.getElementById(listId);
@@ -294,6 +413,7 @@ function setupAutocomplete(inputId, hiddenId, listId, dataArray, displayField, v
 
     if (!val) { list.classList.add("hidden"); return; }
 
+    const dataArray = getDataFn();
     const matches = dataArray.filter((item) => {
       const text = item[displayField] ? String(item[displayField]).toLowerCase() : "";
       return text.includes(val);
@@ -303,7 +423,6 @@ function setupAutocomplete(inputId, hiddenId, listId, dataArray, displayField, v
 
     matches.forEach((item) => {
       const li = document.createElement("li");
-      // ESTILOS DUALES APLICADOS
       li.className = "px-4 py-2 text-gray-700 dark:text-gray-200 cursor-pointer text-sm border-b border-gray-200 dark:border-gray-700 last:border-0 transition-colors hover:bg-blue-50 dark:hover:bg-blue-600 hover:text-blue-700 dark:hover:text-white";
       li.textContent = item[displayField];
 
@@ -346,7 +465,6 @@ function setupAutocomplete(inputId, hiddenId, listId, dataArray, displayField, v
     removeActive(items);
     if (currentFocus >= items.length) currentFocus = 0;
     if (currentFocus < 0) currentFocus = items.length - 1;
-    // ESTILOS DUALES ACTIVOS
     items[currentFocus].classList.add("bg-blue-100", "dark:bg-blue-600", "text-blue-900", "dark:text-white");
   }
 
@@ -357,9 +475,6 @@ function setupAutocomplete(inputId, hiddenId, listId, dataArray, displayField, v
   }
 }
 
-// ==========================================
-// MÓDULO EMISIÓN DE CARGOS DUAL-THEME
-// ==========================================
 function agregarItemLista() {
   const destinoId = document.getElementById("hdDestino").value;
   const destinoText = document.getElementById("inDestino").value;
@@ -447,6 +562,9 @@ function removerItemLista(index) {
   renderizarListaItems();
 }
 
+// ==========================================
+// 8. EMISIÓN OPTIMISTA DE CARGOS (LATENCIA 0ms)
+// ==========================================
 async function handleFormSubmit(e) {
   e.preventDefault();
 
@@ -460,133 +578,118 @@ async function handleFormSubmit(e) {
   if (AppState.cargoItems.length === 0) return mostrarAlerta("Añade al menos un MATERIAL a la lista.", "error", "Lista Vacía");
   if (isSignatureEmpty) return mostrarAlerta("El chofer debe firmar la conformidad.", "error", "Firma Requerida");
 
-  const firmaImagen = signaturePad.toDataURL("image/png");
-  
-  // Loader DUAL-THEME en la ventana de impresión
-  const printTab = window.open("", "_blank");
-  printTab.document.write(`
-    <style>
-      body { background-color: #f9fafb; color: #111827; font-family: system-ui, sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-      @media (prefers-color-scheme: dark) { body { background-color: #111827; color: #f3f4f6; } }
-      .spinner { border: 4px solid rgba(156,163,175,0.2); width: 45px; height: 45px; border-radius: 50%; border-left-color: #3b82f6; animation: spin 1s linear infinite; margin-bottom: 1.5rem; }
-      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
-    <div class="spinner"></div>
-    <h2 style="margin:0 0 0.5rem 0;">Emitiendo Cargo Oficial...</h2>
-    <p style="color:#6b7280; font-size: 0.875rem;">Conectando con el servidor. No cierre esta pestaña.</p>
-  `);
+  // 1. Compresión Edge de la firma (< 8KB)
+  const firmaComprimida = SyncEngine.compressSignature(signaturePad);
+  if (!firmaComprimida) return mostrarAlerta("El trazo de firma es demasiado corto.", "error", "Firma Inválida");
 
-  const btn = document.getElementById("btnSubmit");
-  const txt = btn.innerHTML;
-  btn.innerHTML = `<svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Procesando...`;
-  btn.disabled = true;
+  // 2. Generación de ID Local Optimista (LOC-XXXXXX)
+  const idLocal = `LOC-${Date.now().toString().slice(-6)}`;
+  const choferCat = AppState.datos.choferes.find(c => c.ID_CHFR === chofer);
+  const vehiculoCat = AppState.datos.vehiculos.find(v => v.PLACA === vehiculo);
+  const ahora = new Date();
+  const fechaFormat = `${ahora.getDate().toString().padStart(2, '0')}/${(ahora.getMonth()+1).toString().padStart(2, '0')}/${ahora.getFullYear()} ${ahora.getHours().toString().padStart(2, '0')}:${ahora.getMinutes().toString().padStart(2, '0')}:${ahora.getSeconds().toString().padStart(2, '0')}`;
 
-  const payload = {
-    action: "saveCargo",
-    token: API_SECRET_TOKEN,
-    data: {
-      chofer, vehiculo, area, firma: firmaImagen,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
-      gestorCorreo: AppState.user ? AppState.user.usuario : 'almacenpt@lagenovesa.com.pe',
-      materiales: AppState.cargoItems.map((i) => ({
-        id_memb: i.materialId, materialName: i.materialName, cantidad: i.cantidad, destino: i.destinoId
+  const materialesPayload = AppState.cargoItems.map((i) => ({
+      id_memb: i.materialId,
+      materialName: i.materialName,
+      cantidad: i.cantidad,
+      destino: i.destinoId
+  }));
+
+  // 3. Actualización Instantánea de Estado Local e IndexedDB
+  const nuevoCargoOptimista = {
+      idCargo: idLocal,
+      isLocalSyncPending: true,
+      choferNombre: choferCat ? choferCat.NOMBRE : chofer,
+      placa: vehiculo,
+      hora: fechaFormat,
+      _horaSort: estandarizarFecha(fechaFormat),
+      gestor: AppState.user ? AppState.user.nombre : 'Operador Local',
+      firmaCargo: firmaComprimida,
+      detalles: AppState.cargoItems.map((i, idx) => ({
+          ID_DETALLE: `${idLocal}-D${idx + 1}`,
+          LLEVA: i.cantidad,
+          DEVUELVE: 0,
+          DEUDA: i.cantidad,
+          DESTINO: i.destinoId,
+          MATERIAL: i.materialId,
+          AREA: area
       }))
-    }
   };
 
-  try {
-    const res = await fetch(API_URL, { method: "POST", redirect: "follow", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
-    const result = await res.json();
-    
-    if (result.status === "success") {
-      const idGenerado = result.data.idCargo;
-      const choferCat = AppState.datos.choferes.find(c => c.ID_CHFR === chofer);
-      const vehiculoCat = AppState.datos.vehiculos.find(v => v.PLACA === vehiculo);
-      const ahora = new Date();
-      const fechaFormat = `${ahora.getDate().toString().padStart(2, '0')}/${(ahora.getMonth()+1).toString().padStart(2, '0')}/${ahora.getFullYear()} ${ahora.getHours().toString().padStart(2, '0')}:${ahora.getMinutes().toString().padStart(2, '0')}:${ahora.getSeconds().toString().padStart(2, '0')}`;
+  AppState.cargosActivos.unshift(nuevoCargoOptimista);
+  await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
 
-      AppState.cargosActivos.push({
-        idCargo: idGenerado,
-        choferNombre: choferCat ? choferCat.NOMBRE : chofer,
-        placa: vehiculoCat ? vehiculoCat.DISPLAY_NAME : vehiculo,
-        hora: fechaFormat,
-        firmaCargo: firmaImagen,
-        detalles: AppState.cargoItems.map(i => ({ LLEVA: i.cantidad, DESTINO: i.destinoId, MATERIAL: i.materialId, AREA: area }))
-      });
+  // 4. Encolar en Outbox (Fire & Forget en segundo plano)
+  await SyncEngine.enqueueMutation('saveCargo', {
+      data: {
+          localIdRef: idLocal,
+          chofer,
+          vehiculo,
+          area,
+          firma: firmaComprimida,
+          gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
+          gestorCorreo: AppState.user ? AppState.user.usuario : 'almacenpt@lagenovesa.com.pe',
+          materiales: materialesPayload
+      }
+  });
 
-      generarDocumentoImpresion(idGenerado, printTab);
-      mostrarAlerta(`El viaje ha sido registrado con el ID: ${idGenerado}`, "success", "¡Cargo Emitido!");
-      document.getElementById("cargoForm").reset();
-      ["hdArea", "hdChofer", "hdVehiculo", "hdDestino", "hdMaterial"].forEach((id) => (document.getElementById(id).value = ""));
-      AppState.cargoItems = [];
-      renderizarListaItems();
-      limpiarFirma();
-    } else {
-      if(printTab && !printTab.closed) printTab.close(); 
-      throw new Error(result.message);
-    }
-  } catch (err) {
-    if(printTab && !printTab.closed) printTab.close();
-    mostrarAlerta("Error del servidor: " + err.message, "error", "Fallo de Emisión");
-  } finally {
-    btn.innerHTML = txt; btn.disabled = false;
+  // 5. Impresión opcional inmediata (sin esperar a Google Sheets)
+  if (document.getElementById("chkAutoPrint")?.checked) {
+      generarDocumentoImpresion(idLocal);
   }
+
+  // 6. Limpieza instantánea de UI y Feedback Toast
+  mostrarToast(`Cargo ${idLocal} registrado. Sincronizando en segundo plano...`);
+  document.getElementById("cargoForm").reset();
+  ["hdArea", "hdChofer", "hdVehiculo", "hdDestino", "hdMaterial"].forEach((id) => (document.getElementById(id).value = ""));
+  AppState.cargoItems = [];
+  renderizarListaItems();
+  limpiarFirma();
 }
 
 // ==========================================
-// MÓDULO DE DESCARGOS DUAL-THEME
+// 9. MÓDULO DE DESCARGOS (LECTURA INSTANTÁNEA)
 // ==========================================
 document.getElementById("tabEmitir").addEventListener("click", () => {
   document.getElementById("viewEmitir").classList.remove("hidden");
   document.getElementById("viewDescargo").classList.add("hidden");
   document.getElementById("viewHistorico").classList.add("hidden");
-  document.getElementById("tabEmitir").className = "px-5 py-2 bg-blue-600 rounded-xl text-sm font-bold text-white shadow-lg transition-all";
-  document.getElementById("tabDescargo").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
-  document.getElementById("tabHistorico").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
+  document.getElementById("tabEmitir").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 bg-blue-600 rounded-xl text-xs md:text-sm font-bold text-white shadow-md transition-all";
+  document.getElementById("tabDescargo").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
+  document.getElementById("tabHistorico").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
 });
 
 document.getElementById("tabDescargo").addEventListener("click", () => {
   document.getElementById("viewDescargo").classList.remove("hidden");
   document.getElementById("viewEmitir").classList.add("hidden");
   document.getElementById("viewHistorico").classList.add("hidden");
-  document.getElementById("tabDescargo").className = "px-5 py-2 bg-emerald-600 rounded-xl text-sm font-bold text-white shadow-lg transition-all";
-  document.getElementById("tabEmitir").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
-  document.getElementById("tabHistorico").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
-  cargarViajesPendientes();
+  document.getElementById("tabDescargo").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 bg-emerald-600 rounded-xl text-xs md:text-sm font-bold text-white shadow-md transition-all";
+  document.getElementById("tabEmitir").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
+  document.getElementById("tabHistorico").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
+  
+  renderizarCargosFiltrados();
+  SyncEngine.pullLatestState(); // Revalidación silenciosa
 });
 
 document.getElementById("tabHistorico").addEventListener("click", () => {
   document.getElementById("viewHistorico").classList.remove("hidden");
   document.getElementById("viewEmitir").classList.add("hidden");
   document.getElementById("viewDescargo").classList.add("hidden");
-  document.getElementById("tabHistorico").className = "px-5 py-2 bg-blue-600 rounded-xl text-sm font-bold text-white shadow-lg transition-all";
-  document.getElementById("tabEmitir").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
-  document.getElementById("tabDescargo").className = "px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-sm font-bold transition-all";
-  cargarHistorico();
+  document.getElementById("tabHistorico").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 bg-blue-600 rounded-xl text-xs md:text-sm font-bold text-white shadow-md transition-all";
+  document.getElementById("tabEmitir").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
+  document.getElementById("tabDescargo").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
+  
+  renderizarHistorico();
+  SyncEngine.pullLatestState(); // Revalidación silenciosa
 });
 
-document.getElementById("btnRefreshCargos").addEventListener("click", cargarViajesPendientes);
+document.getElementById("btnRefreshCargos").addEventListener("click", () => {
+    mostrarToast("Sincronizando viajes...");
+    SyncEngine.processQueue().then(() => SyncEngine.pullLatestState());
+});
 document.getElementById("inBuscarCargo").addEventListener("input", renderizarCargosFiltrados);
 document.getElementById("selFiltroColumna").addEventListener("change", renderizarCargosFiltrados);
-
-async function cargarViajesPendientes() {
-  const grid = document.getElementById("gridCargos");
-  grid.innerHTML = `<div class="text-center text-emerald-600 dark:text-emerald-400 py-8 animate-pulse font-bold">Consultando base de datos...</div>`;
-
-  try {
-    const res = await fetch(`${API_URL}?action=getActiveCargos&token=${API_SECRET_TOKEN}`, { method: "GET", redirect: "follow" });
-    const json = await res.json();
-    if (json.status !== "success") throw new Error(json.message);
-
-    AppState.cargosActivos = json.data.map((cargo) => {
-      cargo._horaSort = estandarizarFecha(cargo.hora);
-      return cargo;
-    });
-    renderizarCargosFiltrados();
-  } catch (err) {
-    grid.innerHTML = `<div class="text-center text-red-600 dark:text-red-500 py-8 border border-red-200 dark:border-red-500/50 rounded-xl bg-red-50 dark:bg-red-500/10">Error: ${err.message}</div>`;
-  }
-}
 
 window.setSort = function (key) {
   if (AppState.sortConfig.key === key) AppState.sortConfig.asc = !AppState.sortConfig.asc;
@@ -643,13 +746,13 @@ function renderizarTablaUI(cargos) {
   const grid = document.getElementById("gridCargos");
 
   if (!cargos || cargos.length === 0) {
-    grid.innerHTML = `<div class="text-center text-gray-500 dark:text-gray-400 py-8 font-bold bg-white dark:bg-gray-800/40 rounded-2xl border border-gray-200 dark:border-gray-700/50">No se encontraron viajes pendientes.</div>`;
+    grid.innerHTML = `<div class="text-center text-gray-500 dark:text-gray-400 py-8 font-bold bg-white dark:bg-gray-800/40 rounded-2xl border border-gray-200 dark:border-gray-700/50 mx-4 md:mx-0">No se encontraron viajes pendientes.</div>`;
     return;
   }
 
   let html = `
-    <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700/80 shadow-sm dark:shadow-inner">
-      <table class="w-full text-left text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+    <div class="overflow-x-auto no-scrollbar md:rounded-xl border-y md:border border-gray-200 dark:border-gray-700/80 shadow-sm dark:shadow-inner">
+      <table class="min-w-max w-full text-left text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
         <thead class="bg-gray-100 dark:bg-gray-900/80 text-xs uppercase text-gray-500 dark:text-gray-400 select-none border-b border-gray-200 dark:border-gray-700">
           <tr>
             <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('idCargo')">ID Cargo ${getSortIcon("idCargo")}</th>
@@ -671,10 +774,11 @@ function renderizarTablaUI(cargos) {
     });
 
     const horaSalida = cargo.hora || "--/--/---- --:--:--";
+    const isLocal = String(cargo.idCargo).startsWith("LOC-");
     let badgeEstadoHTML = "";
     
     if (totalDeuda > 0) {
-      badgeEstadoHTML = `<span class="bg-pink-50 dark:bg-pink-600/20 text-pink-600 dark:text-pink-400 border border-pink-200 dark:border-pink-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 justify-center w-fit mx-auto shadow-sm dark:shadow-[0_0_10px_rgba(219,39,119,0.1)]">
+      badgeEstadoHTML = `<span class="bg-pink-50 dark:bg-pink-600/20 text-pink-600 dark:text-pink-400 border border-pink-200 dark:border-pink-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 justify-center w-fit mx-auto shadow-sm">
         <span class="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse"></span>Debe ${totalDeuda}
       </span>`;
     } else if (totalDeuda < 0) {
@@ -689,7 +793,10 @@ function renderizarTablaUI(cargos) {
 
     html += `
       <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${cargo.idCargo}')" title="Clic para ver detalles">
-        <td class="px-4 py-3 font-mono text-gray-500 dark:text-gray-400 text-xs">${cargo.idCargo}</td>
+        <td class="px-4 py-3 font-mono text-xs flex items-center gap-1.5 ${isLocal ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-500 dark:text-gray-400'}">
+          ${isLocal ? `<span class="w-2 h-2 rounded-full bg-blue-500" title="Pendiente de sincronización"></span>` : ''}
+          ${cargo.idCargo}
+        </td>
         <td class="px-4 py-3"><span class="bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 px-2 py-1 rounded text-xs font-bold">${cargo.placa || "S/N"}</span></td>
         <td class="px-4 py-3 font-bold text-gray-800 dark:text-gray-200 truncate max-w-[200px]">${cargo.choferNombre}</td>
         <td class="px-4 py-3 text-emerald-600 dark:text-emerald-400/80 font-mono text-xs tracking-wider">${horaSalida}</td>
@@ -703,7 +810,7 @@ function renderizarTablaUI(cargos) {
 }
 
 // ==========================================
-// MODAL DETALLE Y LIQUIDACIÓN DUAL-THEME
+// 10. MODAL DETALLE Y LIQUIDACIÓN OPTIMISTA
 // ==========================================
 function abrirDetalle(idCargo) {
   const cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
@@ -745,11 +852,11 @@ function abrirDetalle(idCargo) {
 
   const mdlBadge = document.getElementById("mdlBadgeDeuda");
   if (totalDeudaViaje > 0) {
-    mdlBadge.innerHTML = `<span class="bg-pink-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 w-fit shadow-lg shadow-pink-900/50"><svg class="w-4 h-4 animate-spin-slow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Debe ${totalDeudaViaje} materiales</span>`;
+    mdlBadge.innerHTML = `<span class="bg-pink-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 w-fit shadow-lg"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Debe ${totalDeudaViaje} materiales</span>`;
   } else if (totalDeudaViaje < 0) {
-    mdlBadge.innerHTML = `<span class="bg-amber-500 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg shadow-amber-900/50">Excedente: ${Math.abs(totalDeudaViaje)}</span>`;
+    mdlBadge.innerHTML = `<span class="bg-amber-500 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg">Excedente: ${Math.abs(totalDeudaViaje)}</span>`;
   } else {
-    mdlBadge.innerHTML = `<span class="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg shadow-emerald-900/50">Completado / Sin deuda</span>`;
+    mdlBadge.innerHTML = `<span class="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg">Completado / Sin deuda</span>`;
   }
 
   document.getElementById("mdlDestinosCount").textContent = `(${destinosSet.size})`;
@@ -760,7 +867,7 @@ function abrirDetalle(idCargo) {
   document.getElementById("mdlTotalMateriales").outerHTML = `
     <span id="mdlTotalMateriales" class="flex items-center gap-2">
       <span class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white px-2 py-0.5 rounded text-sm">${totalMaterialesLlevados}</span>
-      <span class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 text-emerald-600 dark:text-emerald-400 font-mono px-2 py-0.5 rounded text-xs shadow-sm dark:shadow-inner">
+      <span class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 text-emerald-600 dark:text-emerald-400 font-mono px-2 py-0.5 rounded text-xs shadow-sm">
         Volumen: ${totalM3Llevado.toFixed(3)} m³
       </span>
     </span>
@@ -783,7 +890,7 @@ function abrirDetalle(idCargo) {
          </div>
       </td>
       <td class="px-3 py-3 align-middle w-24">
-        <input type="number" min="0" data-id="${det.ID_DETALLE}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
+        <input type="number" min="0" inputmode="numeric" data-id="${det.ID_DETALLE}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
                class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1.5 text-center text-emerald-600 dark:text-emerald-400 font-bold focus:border-emerald-500 outline-none mdl-return-input transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                ${det.deuda <= 0 ? "disabled" : ""}>
       </td>
@@ -791,10 +898,9 @@ function abrirDetalle(idCargo) {
   `).join("");
   
   const tb = document.getElementById("mdlTablaMateriales");
-  tb.parentNode.className = "w-full text-left text-xs text-gray-700 dark:text-gray-300";
   tb.innerHTML = tablaHTML;
 
-  document.getElementById("btnLiquidarModal").setAttribute("onclick", `procesarLiquidacionModal(this, '${cargo.idCargo}')`);
+  document.getElementById("btnLiquidarModal").setAttribute("onclick", `procesarLiquidacionModal('${cargo.idCargo}')`);
   document.getElementById("btnPrintModal").onclick = () => generarDocumentoImpresion(cargo.idCargo);
 
   const inputsRetorna = document.querySelectorAll(".mdl-return-input:not([disabled])");
@@ -810,8 +916,6 @@ function abrirDetalle(idCargo) {
 
   const modal = document.getElementById("modalDetalle");
   const modalContent = document.getElementById("modalDetalleContent");
-  
-  modalContent.className = "bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl rounded-2xl w-[95%] max-w-7xl max-h-[90vh] flex flex-col overflow-hidden transform scale-95 transition-transform duration-300";
   modal.classList.remove("hidden");
 
   setTimeout(() => {
@@ -821,7 +925,8 @@ function abrirDetalle(idCargo) {
   }, 50);
 }
 
-async function procesarLiquidacionModal(btnElement, idCargo) {
+// LIQUIDACIÓN OPTIMISTA EN 0ms
+async function procesarLiquidacionModal(idCargo) {
   const inputs = document.querySelectorAll(".mdl-return-input:not([disabled])");
   const payloadDevolucion = [];
   inputs.forEach((input) => {
@@ -829,29 +934,43 @@ async function procesarLiquidacionModal(btnElement, idCargo) {
     if (qty > 0) payloadDevolucion.push({ id_detalle: input.getAttribute("data-id"), qty: qty });
   });
 
-  if (payloadDevolucion.length === 0) return mostrarAlerta("Ingresa al menos una cantidad mayor a 0 en la columna 'Retorna'.", "warning", "Datos Insuficientes");
-
-  const textoOriginal = btnElement.innerHTML;
-  btnElement.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Procesando...`;
-  btnElement.disabled = true;
-
-  try {
-    const res = await fetch(API_URL, {
-      method: "POST", redirect: "follow", headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action: "updateDevolucion", token: API_SECRET_TOKEN, data: payloadDevolucion, gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido' })
-    });
-    
-    const result = await res.json();
-    if (result.status === "success") {
-      mostrarAlerta(`Liquidación procesada correctamente. Se actualizaron ${result.data.procesados} registros.`, "success", "¡Guardado Exitoso!");
-      cerrarDetalle();
-      cargarViajesPendientes();
-    } else throw new Error(result.message);
-  } catch (err) {
-    mostrarAlerta("Error del servidor: " + err.message, "error", "Fallo de Conexión");
-  } finally {
-    btnElement.innerHTML = textoOriginal; btnElement.disabled = false;
+  if (payloadDevolucion.length === 0) {
+      return mostrarAlerta("Ingresa al menos una cantidad mayor a 0 en la columna 'Retorna'.", "warning", "Datos Insuficientes");
   }
+
+  // 1. Actualizar estado en memoria e IndexedDB inmediatamente
+  const cargoIndex = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
+  if (cargoIndex !== -1) {
+      const cargo = AppState.cargosActivos[cargoIndex];
+      let deudaRestanteCargo = 0;
+
+      cargo.detalles.forEach(det => {
+          const mov = payloadDevolucion.find(p => p.id_detalle === det.ID_DETALLE);
+          if (mov) {
+              det.DEVUELVE = parseInt(det.DEVUELVE || 0) + mov.qty;
+              det.DEUDA = parseInt(det.LLEVA || 0) - det.DEVUELVE;
+          }
+          deudaRestanteCargo += parseInt(det.DEUDA || 0);
+      });
+
+      // Si el cargo quedó saldado al 100%, lo removemos de pendientes de inmediato
+      if (deudaRestanteCargo <= 0) {
+          AppState.cargosActivos.splice(cargoIndex, 1);
+      }
+
+      await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
+  }
+
+  // 2. Encolar mutación en Outbox (Fire & Forget)
+  await SyncEngine.enqueueMutation('updateDevolucion', {
+      data: payloadDevolucion,
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido'
+  });
+
+  // 3. Cerrar modal, repintar tabla y mostrar Toast instantáneo
+  cerrarDetalle();
+  renderizarCargosFiltrados();
+  mostrarToast(`Liquidación del cargo ${idCargo} guardada. Sincronizando...`);
 }
 
 function cerrarDetalle() {
@@ -863,9 +982,12 @@ function cerrarDetalle() {
 }
 
 // ==========================================
-// MÓDULO HISTÓRICO DUAL-THEME
+// 11. MÓDULO HISTÓRICO (LECTURA INSTANTÁNEA)
 // ==========================================
-document.getElementById("btnRefreshHistorico").addEventListener("click", cargarHistorico);
+document.getElementById("btnRefreshHistorico").addEventListener("click", () => {
+    mostrarToast("Actualizando histórico...");
+    SyncEngine.processQueue().then(() => SyncEngine.pullLatestState());
+});
 document.getElementById("inBuscarHistorico").addEventListener("input", renderizarHistorico);
 document.getElementById("inDesdeHistorico").addEventListener("change", renderizarHistorico);
 document.getElementById("inHastaHistorico").addEventListener("change", renderizarHistorico);
@@ -879,21 +1001,6 @@ window.setHistorySort = function (key) {
 function getHistorySortIcon(key) {
   if (AppState.sortHistoryConfig.key !== key) return `<span class="text-gray-400 dark:text-gray-600 ml-1">↕</span>`;
   return AppState.sortHistoryConfig.asc ? `<span class="text-blue-600 dark:text-blue-400 ml-1">↑</span>` : `<span class="text-blue-600 dark:text-blue-400 ml-1">↓</span>`;
-}
-
-async function cargarHistorico() {
-  const grid = document.getElementById("gridHistorico");
-  grid.innerHTML = `<div class="text-center text-blue-600 dark:text-blue-400 py-12 animate-pulse font-bold text-lg"><svg class="animate-spin -ml-1 mr-3 h-6 w-6 inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Consultando matriz de movimientos...</div>`;
-
-  try {
-    const res = await fetch(`${API_URL}?action=getHistory&token=${API_SECRET_TOKEN}`, { method: "GET", redirect: "follow" });
-    const json = await res.json();
-    if (json.status !== "success") throw new Error(json.message);
-    AppState.historial = json.data;
-    renderizarHistorico();
-  } catch (err) {
-    grid.innerHTML = `<div class="text-center text-red-600 dark:text-red-500 py-8 border border-red-200 dark:border-red-500/50 rounded-xl bg-red-50 dark:bg-red-500/10">Error: ${err.message}</div>`;
-  }
 }
 
 function renderizarHistorico() {
@@ -958,14 +1065,14 @@ function renderizarHistorico() {
   });
 
   if (filtrados.length === 0) {
-    grid.innerHTML = `<div class="text-center text-gray-500 dark:text-gray-400 py-12 font-bold bg-white dark:bg-gray-800/40 rounded-2xl border border-gray-200 dark:border-gray-700/50 italic">No se encontraron movimientos que coincidan con los filtros.</div>`;
+    grid.innerHTML = `<div class="text-center text-gray-500 dark:text-gray-400 py-12 font-bold bg-white dark:bg-gray-800/40 rounded-2xl border border-gray-200 dark:border-gray-700/50 italic mx-4 md:mx-0">No se encontraron movimientos que coincidan con los filtros.</div>`;
     return;
   }
 
   let html = `
-    <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700/80 shadow-sm dark:shadow-inner max-h-[600px] relative bg-white dark:bg-transparent">
-      <table class="w-full text-left text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
-        <thead class="bg-gray-100 dark:bg-gray-900/95 sticky top-0 border-b border-gray-200 dark:border-gray-700 uppercase font-semibold text-gray-500 dark:text-gray-500 z-10 backdrop-blur-sm shadow-sm dark:shadow-md select-none">
+    <div class="overflow-x-auto no-scrollbar md:rounded-xl border-y md:border border-gray-200 dark:border-gray-700/80 shadow-sm dark:shadow-inner max-h-[600px] relative bg-white dark:bg-transparent">
+      <table class="min-w-max w-full text-left text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
+        <thead class="bg-gray-100 dark:bg-gray-900/95 sticky top-0 border-b border-gray-200 dark:border-gray-700 uppercase font-semibold text-gray-500 dark:text-gray-500 z-10 backdrop-blur-sm shadow-sm select-none">
           <tr>
             <th class="px-4 py-3 border-r border-gray-200 dark:border-gray-800/50 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setHistorySort('horaCargo')">Fecha/Hora ${getHistorySortIcon('horaCargo')}</th>
             <th class="px-4 py-3 border-r border-gray-200 dark:border-gray-800/50 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setHistorySort('idCargo')">ID Cargo ${getHistorySortIcon('idCargo')}</th>
@@ -1018,7 +1125,7 @@ function renderizarHistorico() {
 }
 
 // ==========================================
-// MINIMODAL TRAZABILIDAD DUAL-THEME
+// 12. MINIMODAL TRAZABILIDAD
 // ==========================================
 window.abrirTrazabilidad = function(e, idDetalle) {
     const row = AppState.historialFiltrado.find(r => r.idDetalle === idDetalle);
@@ -1047,7 +1154,7 @@ window.abrirTrazabilidad = function(e, idDetalle) {
     const flecha = document.getElementById('trazabilidad-flecha');
 
     contenido.innerHTML = `
-        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/30 p-3 rounded-lg shadow-sm dark:shadow-inner">
+        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/30 p-3 rounded-lg shadow-sm">
           <p class="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
             1. Despacho / Emisión
@@ -1057,7 +1164,7 @@ window.abrirTrazabilidad = function(e, idDetalle) {
           <p class="text-[10px] text-blue-700 dark:text-blue-300 font-mono bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded w-fit">${row.horaCargo || '--'}</p>
         </div>
         
-        <div class="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-500/30 p-3 rounded-lg shadow-sm dark:shadow-inner">
+        <div class="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-500/30 p-3 rounded-lg shadow-sm">
           <p class="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
             2. Descargo / Devolución
@@ -1097,9 +1204,9 @@ window.abrirTrazabilidad = function(e, idDetalle) {
 };
 
 // ==========================================
-// MOTOR DE IMPRESIÓN (PDF)
+// 13. MOTOR DE IMPRESIÓN OFFLINE-READY
 // ==========================================
-function generarDocumentoImpresion(idCargo, targetWindow = null) {
+function generarDocumentoImpresion(idCargo) {
   const cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
   if (!cargo) return;
 
@@ -1124,147 +1231,116 @@ function generarDocumentoImpresion(idCargo, targetWindow = null) {
 
       return `
       <tr>
-        <td class="py-1 px-2 border-b border-gray-200 text-gray-600">${nombreDestino}</td>
-        <td class="py-1 px-2 border-b border-gray-200 font-medium text-gray-800">${nombreMaterial}</td>
-        <td class="py-1 px-2 border-b border-gray-200 text-center font-bold text-gray-900">${lleva}</td>
-        <td class="py-1 px-2 border-b border-gray-200 text-center"></td>
+        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; color: #4b5563;">${nombreDestino}</td>
+        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #1f2937;">${nombreMaterial}</td>
+        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: center; font-weight: 700; color: #111827;">${lleva}</td>
+        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: center;"></td>
       </tr>
     `;
     }).join("");
 
   const destinosHTML = Array.from(destinosSet).map((dest) => `<div>• ${dest}</div>`).join("");
-  const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span class="font-bold mr-1">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
+  const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span style="font-weight:700; margin-right:4px;">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
   const areaRaw = cargo.detalles[0]?.AREA || cargo.area || "Almacén PT";
   const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
   const areaResponsable = areaCat ? areaCat.REFERENCIA : areaRaw;
 
-  // DUAL-THEME LOADER EN LA PESTAÑA TEMPORAL
   const htmlPlantilla = `
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <title>Cargo_${cargo.idCargo}_${cargo.choferNombre.replace(/\s+/g, "")}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f9fafb; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        @media (prefers-color-scheme: dark) { body { background-color: #111827; } }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, -apple-system, sans-serif; background-color: #f3f4f6; color: #1f2937; font-size: 12px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         .a4-container { max-width: 21cm; margin: 1rem auto; background: white; padding: 1cm; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
-        #lista tr:nth-child(even) { background-color: #f9fafb; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1f2937; padding-bottom: 12px; margin-bottom: 16px; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; background: #f9fafb; padding: 12px; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        th { background: #1f2937; color: white; font-size: 10px; text-transform: uppercase; padding: 6px 8px; text-align: left; }
+        tr:nth-child(even) { background-color: #f9fafb; }
+        .footer-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 16px; }
+        .btn-float { position: fixed; bottom: 24px; right: 24px; background: #1f2937; color: white; border: none; padding: 12px 24px; border-radius: 9999px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
         @media print {
-            body { background-color: white; }
+            body { background: white; }
             .a4-container { margin: 0; padding: 0; box-shadow: none; max-width: 100%; }
             .no-print { display: none !important; }
             @page { size: A4 portrait; margin: 0.5cm; }
         }
     </style>
 </head>
-<body class="text-gray-800 antialiased text-xs">
-    <div class="fixed bottom-6 right-6 flex flex-col gap-3 no-print z-50">
-        <button onclick="window.print()" class="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white px-5 py-3 rounded-full shadow-lg font-semibold transition-transform transform hover:scale-105">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
-            Imprimir
-        </button>
-        <button id="generatePdfButton" class="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-full shadow-lg font-semibold transition-transform transform hover:scale-105">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-            Descargar PDF
-        </button>
-    </div>
+<body>
+    <button onclick="window.print()" class="btn-float no-print">🖨️ Imprimir / Guardar PDF</button>
 
-    <div class="a4-container relative" id="pdf-content">
-        <header class="flex justify-between items-start border-b border-gray-800 pb-3 mb-4">
-            <div class="w-36 shrink-0">
-                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='60 20 280 160'%3E%3Cpath d='m200 25 135 47v56l-135 47-135-47V72z' fill='%23C51D23' stroke='%23C51D23' stroke-width='8' stroke-linejoin='round'/%3E%3Cpath d='m200 25 135 47v56l-135 47-135-47V72z' fill='none' stroke='%23B08D57' stroke-width='1' stroke-linejoin='round'/%3E%3Ctext x='200' y='86' font-family='Times, serif' font-size='36' font-weight='bold' text-anchor='middle' fill='%23404040'%3ELA%3C/text%3E%3Ctext x='200' y='85' font-family='Times, serif' font-size='36' font-weight='bold' text-anchor='middle' fill='%23FFF'%3ELA%3C/text%3E%3Ctext x='200' y='121' font-family='Times, serif' font-size='42' font-weight='bold' text-anchor='middle' fill='%23404040'%3EGENOVESA%3C/text%3E%3Ctext x='200' y='120' font-family='Times, serif' font-size='42' font-weight='bold' text-anchor='middle' fill='%23FFF'%3EGENOVESA%3C/text%3E%3Ctext x='200' y='145' font-family='Arial, sans-serif' font-size='12' text-anchor='middle' fill='%23FFF' letter-spacing='3'%3EDESDE 1977%3C/text%3E%3C/svg%3E" class="w-full h-auto" alt="Logo La Genovesa">
+    <div class="a4-container">
+        <div class="header">
+            <div style="width: 140px;">
+                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='60 20 280 160'%3E%3Cpath d='m200 25 135 47v56l-135 47-135-47V72z' fill='%23C51D23' stroke='%23C51D23' stroke-width='8' stroke-linejoin='round'/%3E%3Cpath d='m200 25 135 47v56l-135 47-135-47V72z' fill='none' stroke='%23B08D57' stroke-width='1' stroke-linejoin='round'/%3E%3Ctext x='200' y='86' font-family='Times, serif' font-size='36' font-weight='bold' text-anchor='middle' fill='%23404040'%3ELA%3C/text%3E%3Ctext x='200' y='85' font-family='Times, serif' font-size='36' font-weight='bold' text-anchor='middle' fill='%23FFF'%3ELA%3C/text%3E%3Ctext x='200' y='121' font-family='Times, serif' font-size='42' font-weight='bold' text-anchor='middle' fill='%23404040'%3EGENOVESA%3C/text%3E%3Ctext x='200' y='120' font-family='Times, serif' font-size='42' font-weight='bold' text-anchor='middle' fill='%23FFF'%3EGENOVESA%3C/text%3E%3Ctext x='200' y='145' font-family='Arial, sans-serif' font-size='12' text-anchor='middle' fill='%23FFF' letter-spacing='3'%3EDESDE 1977%3C/text%3E%3C/svg%3E" style="width:100%; height:auto;" alt="Logo La Genovesa">
             </div>
-            <div class="text-right flex flex-col justify-center mt-2">
-                <h1 class="text-lg font-bold text-gray-900 uppercase tracking-tight">Cargo de Embalajes</h1>
-                <p class="text-xs font-semibold text-gray-600 mt-0.5">La Genovesa Agroindustrias S.A.</p>
-                <p class="text-[10px] text-gray-500 uppercase tracking-wider mt-0.5">${areaResponsable}</p>
+            <div style="text-align: right; margin-top: 8px;">
+                <h1 style="font-size: 18px; font-weight: 800; text-transform: uppercase;">Cargo de Embalajes</h1>
+                <p style="font-weight: 600; color: #4b5563;">La Genovesa Agroindustrias S.A.</p>
+                <p style="font-size: 10px; color: #6b7280; text-transform: uppercase;">${areaResponsable}</p>
             </div>
-        </header>
+        </div>
 
-        <section class="grid grid-cols-2 gap-x-6 gap-y-2 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+        <div class="info-grid">
             <div>
-                <p class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-0.5">Documento</p>
-                <p class="text-xs"><span class="font-semibold text-gray-900">N° Cargo:</span> <span class="font-mono bg-white border border-gray-300 px-1 py-0.5 rounded ml-1">${cargo.idCargo}</span></p>
-                <p class="text-xs mt-1"><span class="font-semibold text-gray-900">Emisión:</span> ${cargo.hora || "--"}</p>
+                <p style="font-size: 10px; color: #6b7280; font-weight: bold; text-transform: uppercase; margin-bottom: 4px;">Documento</p>
+                <p><strong>N° Cargo:</strong> <span style="font-family: monospace; background: white; border: 1px solid #d1d5db; padding: 2px 4px; border-radius: 4px;">${cargo.idCargo}</span></p>
+                <p style="margin-top: 4px;"><strong>Emisión:</strong> ${cargo.hora || "--"}</p>
             </div>
             <div>
-                <p class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-0.5">Transporte</p>
-                <p class="text-xs"><span class="font-semibold text-gray-900">Chofer:</span> <span class="capitalize">${cargo.choferNombre}</span></p>
-                <p class="text-xs mt-1"><span class="font-semibold text-gray-900">Vehículo:</span> <span class="font-mono bg-white border border-gray-300 px-1 py-0.5 rounded ml-1">${cargo.placa || "S/N"}</span></p>
+                <p style="font-size: 10px; color: #6b7280; font-weight: bold; text-transform: uppercase; margin-bottom: 4px;">Transporte</p>
+                <p><strong>Chofer:</strong> ${cargo.choferNombre}</p>
+                <p style="margin-top: 4px;"><strong>Vehículo:</strong> <span style="font-family: monospace; background: white; border: 1px solid #d1d5db; padding: 2px 4px; border-radius: 4px;">${cargo.placa || "S/N"}</span></p>
             </div>
-        </section>
+        </div>
 
-        <section class="mb-4">
-            <table class="w-full text-left border-collapse text-xs">
-                <thead>
-                    <tr class="bg-gray-800 text-white text-[10px] uppercase tracking-wider">
-                        <th class="py-1.5 px-2 rounded-tl w-1/3">Destino</th>
-                        <th class="py-1.5 px-2 w-1/3">Material</th>
-                        <th class="py-1.5 px-2 text-center">Lleva</th>
-                        <th class="py-1.5 px-2 text-center rounded-tr">Devolución</th>
-                    </tr>
-                </thead>
-                <tbody id="lista" class="border border-gray-200">
-                    ${filasTablaHTML}
-                </tbody>
-                <tfoot>
-                    <tr class="bg-gray-100 border-t border-gray-300">
-                        <td colspan="2" class="py-2 px-2 text-right font-bold text-gray-600 uppercase text-[10px] tracking-wider">Total General del Viaje:</td>
-                        <td class="py-2 px-2 text-center font-black text-blue-700 text-base">${totalLlevado} <span class="text-[9px] text-gray-500 font-bold uppercase">und</span></td>
-                        <td class="py-2 px-2 text-center font-mono text-emerald-600 font-bold text-xs">${totalM3Llevado.toFixed(3)} m³</td>
-                    </tr>
-                </tfoot>
-            </table>
-        </section>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 33%;">Destino</th>
+                    <th style="width: 33%;">Material</th>
+                    <th style="text-align: center;">Lleva</th>
+                    <th style="text-align: center;">Devolución</th>
+                </tr>
+            </thead>
+            <tbody style="border: 1px solid #e5e7eb;">
+                ${filasTablaHTML}
+            </tbody>
+            <tfoot>
+                <tr style="background: #f3f4f6; border-top: 1px solid #d1d5db;">
+                    <td colspan="2" style="padding: 8px; text-align: right; font-weight: bold; color: #4b5563; font-size: 10px; text-transform: uppercase;">Total General del Viaje:</td>
+                    <td style="padding: 8px; text-align: center; font-weight: 900; color: #1d4ed8; font-size: 14px;">${totalLlevado} und</td>
+                    <td style="padding: 8px; text-align: center; font-family: monospace; color: #059669; font-weight: bold;">${totalM3Llevado.toFixed(3)} m³</td>
+                </tr>
+            </tfoot>
+        </table>
 
-        <section class="grid grid-cols-12 gap-4 mt-4">
-            <div class="col-span-4">
-                <h4 class="text-[10px] font-bold text-gray-500 uppercase border-b border-gray-200 pb-0.5 mb-1">Destinos</h4>
-                <div class="text-[10px] text-gray-700 space-y-0.5 leading-snug">${destinosHTML}</div>
+        <div class="footer-grid">
+            <div>
+                <h4 style="font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; padding-bottom: 2px; margin-bottom: 4px;">Destinos</h4>
+                <div style="font-size: 10px; color: #374151; line-height: 1.4;">${destinosHTML}</div>
             </div>
-            <div class="col-span-4">
-                <h4 class="text-[10px] font-bold text-gray-500 uppercase border-b border-gray-200 pb-0.5 mb-1">Tipos de Material</h4>
-                <div class="text-[10px] text-gray-700 space-y-0.5 font-mono leading-snug">${tiposHTML}</div>
+            <div>
+                <h4 style="font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; padding-bottom: 2px; margin-bottom: 4px;">Tipos de Material</h4>
+                <div style="font-size: 10px; color: #374151; font-family: monospace; line-height: 1.4;">${tiposHTML}</div>
             </div>
-            <div class="col-span-4 flex flex-col justify-end items-center pt-2">
-                <div class="w-full max-w-[180px] border-b border-gray-800 border-dashed pb-1 flex justify-center items-end mb-1 min-h-[50px]">
+            <div style="display: flex; flex-direction: column; justify-content: flex-end; align-items: center;">
+                <div style="width: 100%; max-width: 180px; border-bottom: 1px dashed #1f2937; padding-bottom: 4px; display: flex; justify-content: center; align-items: flex-end; margin-bottom: 4px; min-height: 50px;">
                     ${cargo.firmaCargo ? `<img src="${cargo.firmaCargo}" style="max-height: 45px; object-fit: contain;">` : ''}
                 </div>
-                <p class="text-[10px] font-bold text-gray-900 uppercase text-center w-full truncate" title="${cargo.choferNombre}">${cargo.choferNombre}</p>
-                <p class="text-[9px] text-gray-500 uppercase text-center mt-0.5">Firma de Conformidad</p>
+                <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; text-align: center;">${cargo.choferNombre}</p>
+                <p style="font-size: 9px; color: #6b7280; text-transform: uppercase; text-align: center;">Firma de Conformidad</p>
             </div>
-        </section>
-        
-        <div class="absolute bottom-2 left-0 w-full text-center text-[9px] text-gray-400 no-print" style="display: none;">
-            Documento generado por Sistema GenLogistics
         </div>
     </div>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script>
-        document.getElementById('generatePdfButton').addEventListener('click', function () {
-            const btnContainer = document.querySelector('.fixed.bottom-6');
-            btnContainer.style.display = 'none';
-            const element = document.getElementById('pdf-content');
-            const opt = {
-                margin: [5, 5, 5, 5],
-                filename: document.title + '.pdf',
-                image: { type: 'jpeg', quality: 1 },
-                html2canvas: { scale: 2, useCORS: true, letterRendering: true }, 
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
-            html2pdf().set(opt).from(element).save().then(() => {
-                btnContainer.style.display = 'flex';
-            });
-        });
-    </script>
 </body>
 </html>`;
 
-  const printWindow = targetWindow || window.open("", "_blank");
+  const printWindow = window.open("", "_blank");
   if(printWindow) {
     printWindow.document.open();
     printWindow.document.write(htmlPlantilla);
