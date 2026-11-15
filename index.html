@@ -362,5 +362,17 @@
   <!-- Carga secuencial: Primero el Motor Offline, luego la Lógica UI -->
   <script src="sync-engine.js"></script>
   <script src="script.js"></script>
+
+  <!-- Registro de Service Worker para Soporte 100% Offline -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js')
+          .then((reg) => console.info('[AppShell] SW registrado con éxito:', reg.scope))
+          .catch((err) => console.warn('[AppShell] Error registrando SW:', err));
+      });
+    }
+  </script>
+  
 </body>
 </html>
