@@ -1,28 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* ==============================================================
    ESTILOS PERSONALIZADOS - SISTEMA GENLOGISTICS
    ============================================================== */
 
-/* Scrollbar Personalizado (Webkit: Chrome, Edge, Safari) */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(31, 41, 55, 0.5); /* bg-gray-800 con opacidad */
+  background: rgba(31, 41, 55, 0.5);
   border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #4b5563; /* bg-gray-600 */
+  background: #4b5563;
   border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #6b7280; /* bg-gray-500 */
+  background: #6b7280;
 }
 
-/* Scrollbar Personalizado (Firefox) */
 * {
   scrollbar-width: thin;
   scrollbar-color: #4b5563 transparent;
