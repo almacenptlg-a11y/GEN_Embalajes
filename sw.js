@@ -3,7 +3,7 @@
  * @architecture Cache-First para App Shell | Network-Only para API GAS
  */
 
-const CACHE_VERSION = 'genlogistics-embalajes-v1.1.1';
+const CACHE_VERSION = 'genlogistics-embalajes-v1.1.2';
 
 // Recursos estáticos críticos que forman el App Shell (100% Zero-CDN)
 const APP_SHELL_ASSETS = [

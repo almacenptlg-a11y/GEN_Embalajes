@@ -21,7 +21,12 @@ const AppState = {
   cargoItems: [],
   cargosActivos: [],
   sortConfig: { key: "fecha", asc: false },
-  filtroSoloCriticosSLA: false,
+  filtrosGlobales: {
+    soloCriticosSLA: false,
+    materialId: null,       // ID_MEMB seleccionado en los chips "EN RUTA"
+    fechaDesde: "",         // YYYY-MM-DD sincronizado en ambas vistas
+    fechaHasta: ""          // YYYY-MM-DD sincronizado en ambas vistas
+  },
   historial: [],
   historialFiltrado: [],
   sortHistoryConfig: { key: "horaCargo", asc: false }
@@ -635,7 +640,7 @@ async function handleFormSubmit(e) {
 }
 
 // ==========================================
-// 9. MÓDULO DE DESCARGOS, SLA Y KPIs EN TIEMPO REAL
+// 9. MOTOR DE FILTROS CRUZADOS, KPIs Y DESCARGOS
 // ==========================================
 document.getElementById("tabEmitir").addEventListener("click", () => {
   document.getElementById("viewEmitir").classList.remove("hidden");
@@ -677,6 +682,57 @@ document.getElementById("btnRefreshCargos").addEventListener("click", () => {
 document.getElementById("inBuscarCargo").addEventListener("input", renderizarCargosFiltrados);
 document.getElementById("selFiltroColumna").addEventListener("change", renderizarCargosFiltrados);
 
+// Sincronización bidireccional de rango de fechas entre Descargos e Histórico
+function sincronizarFechasGlobales(tipo, valor) {
+  if (tipo === "desde") {
+    AppState.filtrosGlobales.fechaDesde = valor;
+    const elDesc = document.getElementById("inDesdeDescargos");
+    const elHist = document.getElementById("inDesdeHistorico");
+    if (elDesc && elDesc.value !== valor) elDesc.value = valor;
+    if (elHist && elHist.value !== valor) elHist.value = valor;
+  } else {
+    AppState.filtrosGlobales.fechaHasta = valor;
+    const elDesc = document.getElementById("inHastaDescargos");
+    const elHist = document.getElementById("inHastaHistorico");
+    if (elDesc && elDesc.value !== valor) elDesc.value = valor;
+    if (elHist && elHist.value !== valor) elHist.value = valor;
+  }
+  renderizarCargosFiltrados();
+  renderizarHistorico();
+}
+
+document.getElementById("inDesdeDescargos")?.addEventListener("change", (e) => sincronizarFechasGlobales("desde", e.target.value));
+document.getElementById("inHastaDescargos")?.addEventListener("change", (e) => sincronizarFechasGlobales("hasta", e.target.value));
+document.getElementById("inDesdeHistorico")?.addEventListener("change", (e) => sincronizarFechasGlobales("desde", e.target.value));
+document.getElementById("inHastaHistorico")?.addEventListener("change", (e) => sincronizarFechasGlobales("hasta", e.target.value));
+
+window.toggleFiltroMaterialGlobal = function (materialId) {
+  AppState.filtrosGlobales.materialId = (AppState.filtrosGlobales.materialId === materialId) ? null : materialId;
+  renderizarCargosFiltrados();
+  renderizarHistorico();
+};
+
+window.toggleFiltroCriticosSLA = function () {
+  AppState.filtrosGlobales.soloCriticosSLA = !AppState.filtrosGlobales.soloCriticosSLA;
+  renderizarCargosFiltrados();
+  renderizarHistorico();
+};
+
+window.limpiarFiltrosGlobales = function () {
+  AppState.filtrosGlobales.materialId = null;
+  AppState.filtrosGlobales.soloCriticosSLA = false;
+  AppState.filtrosGlobales.fechaDesde = "";
+  AppState.filtrosGlobales.fechaHasta = "";
+
+  ["inDesdeDescargos", "inHastaDescargos", "inDesdeHistorico", "inHastaHistorico"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+
+  renderizarCargosFiltrados();
+  renderizarHistorico();
+};
+
 window.setSort = function (key) {
   if (AppState.sortConfig.key === key) AppState.sortConfig.asc = !AppState.sortConfig.asc;
   else { AppState.sortConfig.key = key; AppState.sortConfig.asc = true; }
@@ -695,6 +751,24 @@ function estandarizarFecha(fechaLatina) {
     return `${partes[2]}-${partes[1].padStart(2, "0")}-${partes[0].padStart(2, "0")} ${(partes[3] || "00").padStart(2, "0")}:${(partes[4] || "00").padStart(2, "0")}:${(partes[5] || "00").padStart(2, "0")}`;
   }
   return String(fechaLatina);
+}
+
+function extraerFechaISO(fechaLatina) {
+  if (!fechaLatina) return "";
+  const datePart = String(fechaLatina).split(" ")[0];
+  const parts = datePart.split("/");
+  if (parts.length !== 3) return "";
+  return `${parts[2]}-${parts[1].padStart(2, "0")}-${parts[0].padStart(2, "0")}`;
+}
+
+function cumpleRangoFechas(fechaLatina) {
+  const { fechaDesde, fechaHasta } = AppState.filtrosGlobales;
+  if (!fechaDesde && !fechaHasta) return true;
+  const iso = extraerFechaISO(fechaLatina);
+  if (!iso) return false;
+  if (fechaDesde && iso < fechaDesde) return false;
+  if (fechaHasta && iso > fechaHasta) return false;
+  return true;
 }
 
 function calcularHorasTranscurridas(fechaLatina) {
@@ -723,11 +797,6 @@ function getBadgeSLA(fechaLatina) {
   return `<span class="ml-1.5 px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 dark:bg-gray-800 text-gray-500">${horas}h</span>`;
 }
 
-window.toggleFiltroCriticosSLA = function () {
-  AppState.filtroSoloCriticosSLA = !AppState.filtroSoloCriticosSLA;
-  renderizarCargosFiltrados();
-};
-
 window.filtrarPorChoferKPI = function (nombreChofer) {
   const input = document.getElementById("inBuscarCargo");
   const select = document.getElementById("selFiltroColumna");
@@ -750,9 +819,9 @@ function renderizarKPIsDescargos() {
   let totalM3Calle = 0;
   let viajesCriticos48h = 0;
   const deudaPorChofer = {};
-  const deudaPorMaterial = {};
+  const deudaPorMaterialMap = new Map(); // Key: ID_MEMB, Value: { id, nombre, cantidad }
 
-  const matMap = new Map(AppState.datos.materiales.map(m => [m.ID_MEMB, m]));
+  const matCatalogMap = new Map(AppState.datos.materiales.map(m => [m.ID_MEMB, m]));
 
   AppState.cargosActivos.forEach(cargo => {
     const horas = calcularHorasTranscurridas(cargo.hora);
@@ -768,12 +837,16 @@ function renderizarKPIsDescargos() {
         deudaViaje += deuda;
         totalUnidadesCalle += deuda;
 
-        const matObj = matMap.get(d.MATERIAL);
+        const matId = d.MATERIAL || "OTRO";
+        const matObj = matCatalogMap.get(matId);
         const m3Unit = matObj && matObj.M3 ? parseFloat(String(matObj.M3).replace(",", ".")) : 0;
-        const matNombre = matObj ? matObj.DESCRIPCION : (d.MATERIAL || "Otro");
+        const matNombre = matObj ? matObj.DESCRIPCION : matId;
 
         totalM3Calle += (m3Unit * deuda);
-        deudaPorMaterial[matNombre] = (deudaPorMaterial[matNombre] || 0) + deuda;
+
+        const actual = deudaPorMaterialMap.get(matId) || { id: matId, nombre: matNombre, cantidad: 0 };
+        actual.cantidad += deuda;
+        deudaPorMaterialMap.set(matId, actual);
       }
     });
 
@@ -788,6 +861,8 @@ function renderizarKPIsDescargos() {
   Object.entries(deudaPorChofer).forEach(([chofer, cant]) => {
     if (cant > topDeuda) { topDeuda = cant; topChofer = chofer; }
   });
+
+  const { soloCriticosSLA, materialId: filtroMatActivo } = AppState.filtrosGlobales;
 
   container.innerHTML = `
     <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-4 shadow-sm">
@@ -806,10 +881,10 @@ function renderizarKPIsDescargos() {
       </div>
     </div>
 
-    <div onclick="toggleFiltroCriticosSLA()" title="Clic para filtrar viajes con +48h" class="cursor-pointer transition-all rounded-2xl p-4 shadow-sm border ${AppState.filtroSoloCriticosSLA ? 'bg-red-100 dark:bg-red-900/40 border-red-500 ring-2 ring-red-500/40' : 'bg-gray-50 dark:bg-gray-900/70 border-gray-200 dark:border-gray-700/80 hover:border-red-400'}">
+    <div onclick="toggleFiltroCriticosSLA()" title="Clic para filtrar viajes con +48h en ambas vistas" class="cursor-pointer transition-all rounded-2xl p-4 shadow-sm border ${soloCriticosSLA ? 'bg-red-100 dark:bg-red-900/40 border-red-500 ring-2 ring-red-500/40' : 'bg-gray-50 dark:bg-gray-900/70 border-gray-200 dark:border-gray-700/80 hover:border-red-400'}">
       <div class="flex justify-between items-center">
         <p class="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Alerta SLA (+48h)</p>
-        <span class="text-[10px] text-gray-400">${AppState.filtroSoloCriticosSLA ? 'Filtro activo ✕' : 'Filtrar'}</span>
+        <span class="text-[10px] text-gray-400">${soloCriticosSLA ? 'Filtro activo ✕' : 'Filtrar'}</span>
       </div>
       <div class="flex items-baseline justify-between mt-1">
         <span class="text-2xl font-black ${viajesCriticos48h > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-800 dark:text-gray-200'}">${viajesCriticos48h}</span>
@@ -826,17 +901,29 @@ function renderizarKPIsDescargos() {
     </div>
   `;
 
-  const materialesKeys = Object.keys(deudaPorMaterial);
-  if (materialesKeys.length === 0) {
+  if (deudaPorMaterialMap.size === 0) {
     matContainer.innerHTML = "";
   } else {
-    matContainer.innerHTML = `<span class="text-[10px] font-bold uppercase text-gray-400 mr-1">En ruta:</span>` +
-      materialesKeys.map(mat => `
-        <span class="inline-flex items-center gap-1.5 text-xs bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 px-2.5 py-1 rounded-lg text-gray-700 dark:text-gray-300 shadow-sm">
-          <span class="truncate max-w-[180px]" title="${mat}">${mat}</span>
-          <strong class="text-blue-600 dark:text-blue-400 font-mono">${deudaPorMaterial[mat]}</strong>
-        </span>
-      `).join("");
+    const chipsHTML = Array.from(deudaPorMaterialMap.values()).map(item => {
+      const isSelected = filtroMatActivo === item.id;
+      const btnClasses = isSelected
+        ? "bg-blue-600 text-white border-blue-600 ring-2 ring-blue-500/40 shadow-md"
+        : "bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-400";
+      const badgeClasses = isSelected
+        ? "text-white font-black"
+        : "text-blue-600 dark:text-blue-400 font-bold";
+
+      return `
+        <button type="button" onclick="toggleFiltroMaterialGlobal('${item.id}')" title="Clic para filtrar por ${item.nombre} en Descargos e Histórico"
+                class="inline-flex items-center gap-1.5 text-xs border px-3 py-1.5 rounded-xl transition-all cursor-pointer shadow-sm active:scale-95 ${btnClasses}">
+          <span class="truncate max-w-[190px]">${item.nombre}</span>
+          <span class="font-mono ${badgeClasses}">${item.cantidad}</span>
+          ${isSelected ? '<span class="ml-0.5 text-[10px]">✕</span>' : ''}
+        </button>
+      `;
+    }).join("");
+
+    matContainer.innerHTML = `<span class="text-[10px] font-bold uppercase text-gray-400 mr-1">En ruta (Filtrar):</span>` + chipsHTML;
   }
 }
 
@@ -846,11 +933,22 @@ function renderizarCargosFiltrados() {
   let filtrados = [...AppState.cargosActivos];
   const searchTerm = document.getElementById("inBuscarCargo").value.toLowerCase().trim();
   const filtroColumna = document.getElementById("selFiltroColumna").value;
+  const { soloCriticosSLA, materialId } = AppState.filtrosGlobales;
 
-  if (AppState.filtroSoloCriticosSLA) {
+  // 1. Filtro por rango de fechas compartido
+  filtrados = filtrados.filter(c => cumpleRangoFechas(c.hora));
+
+  // 2. Filtro SLA (+48h)
+  if (soloCriticosSLA) {
     filtrados = filtrados.filter(c => calcularHorasTranscurridas(c.hora) >= 48);
   }
 
+  // 3. Filtro por chip de material seleccionado
+  if (materialId) {
+    filtrados = filtrados.filter(c => c.detalles.some(d => d.MATERIAL === materialId && (parseInt(d.DEUDA ?? (d.LLEVA - d.DEVUELVE), 10) > 0)));
+  }
+
+  // 4. Filtro de texto
   if (searchTerm) {
     filtrados = filtrados.filter((c) => {
       const valPlaca = String(c.placa || "").toLowerCase();
@@ -975,9 +1073,35 @@ window.autocompletarDevolucionTotal = function () {
   mostrarToast("Deuda completa autocompletada al 100%.");
 };
 
-function abrirDetalle(idCargo) {
-  const cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
-  if (!cargo) return;
+function abrirDetalle(idCargo, highlightMaterialId = null) {
+  let cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
+
+  // Si no está en cargosActivos (ya cerrado/liquidado), reconstruirlo desde Histórico en modo auditoría
+  if (!cargo) {
+    const lineasHistorico = AppState.historial.filter((h) => h.idCargo === idCargo);
+    if (lineasHistorico.length === 0) return;
+
+    const ref = lineasHistorico[0];
+    const idChoferLimpio = ref.chofer ? String(ref.chofer).replace(/'/g, "") : "";
+    const choferObj = AppState.datos.choferes.find((c) => c.ID_CHFR === idChoferLimpio);
+
+    cargo = {
+      idCargo: ref.idCargo,
+      choferNombre: choferObj ? choferObj.NOMBRE : (ref.chofer || "Desconocido"),
+      placa: ref.placa || "S/N",
+      hora: ref.horaCargo || "--",
+      gestor: ref.gestorCargo || "No registrado",
+      detalles: lineasHistorico.map((h) => ({
+        ID_DETALLE: h.idDetalle,
+        LLEVA: h.lleva,
+        DEVUELVE: h.devuelve,
+        DEUDA: h.deuda,
+        DESTINO: h.destino,
+        MATERIAL: h.material,
+        EMISOR: h.emisor
+      }))
+    };
+  }
 
   let totalMaterialesLlevados = 0, totalDeudaViaje = 0, totalM3Llevado = 0;
   const destinosSet = new Set(), resumenTipos = {};
@@ -1039,7 +1163,7 @@ function abrirDetalle(idCargo) {
 
   // 1. Renderizado Tabla Escritorio (Desktop)
   const tablaHTML = detallesProcesados.map((det) => `
-    <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${det.deuda <= 0 ? "opacity-60 bg-gray-50 dark:bg-gray-900/30" : ""}">
+    <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${det.deuda <= 0 ? "opacity-60 bg-gray-50 dark:bg-gray-900/30" : ""} ${det.MATERIAL === highlightMaterialId ? "bg-blue-50/80 dark:bg-blue-900/25 ring-1 ring-inset ring-blue-500/40" : ""}">
       <td class="px-4 py-3.5 text-gray-600 dark:text-gray-400 font-medium">${det.nombreDestino}</td>
       <td class="px-4 py-3.5">
         <div class="${det.deuda <= 0 ? "text-gray-500" : "text-gray-900 dark:text-gray-100"} font-bold">${det.nombreMaterial}</div>
@@ -1193,6 +1317,8 @@ async function procesarLiquidacionModal(idCargo) {
   cerrarDetalle();
   renderizarCargosFiltrados();
   mostrarToast(`Liquidación del cargo ${idCargo} guardada. Sincronizando...`);
+
+  if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
 }
 
 // ==========================================
@@ -1299,8 +1425,27 @@ window.exportarHistoricoCSV = function () {
 function renderizarHistorico() {
   const grid = document.getElementById("gridHistorico");
   const searchTerm = document.getElementById("inBuscarHistorico").value.toLowerCase().trim();
-  const fechaDesde = document.getElementById("inDesdeHistorico").value;
-  const fechaHasta = document.getElementById("inHastaHistorico").value;
+  const { materialId, soloCriticosSLA, fechaDesde, fechaHasta } = AppState.filtrosGlobales;
+
+  // Actualizar banner de filtros activos en Histórico
+  const banner = document.getElementById("bannerFiltroGlobalHistorico");
+  const bannerTxt = document.getElementById("textoFiltroGlobalHistorico");
+  if (banner && bannerTxt) {
+    const etiquetas = [];
+    if (materialId) {
+      const mObj = AppState.datos.materiales.find(m => m.ID_MEMB === materialId);
+      etiquetas.push(`Material: ${mObj ? mObj.DESCRIPCION : materialId}`);
+    }
+    if (soloCriticosSLA) etiquetas.push("Solo críticos (+48h)");
+    if (fechaDesde || fechaHasta) etiquetas.push(`Fechas: ${fechaDesde || '...'} a ${fechaHasta || '...'}`);
+
+    if (etiquetas.length > 0) {
+      banner.classList.remove("hidden");
+      bannerTxt.innerHTML = `<span>Filtros activos:</span> <span class="bg-blue-600 text-white px-2 py-0.5 rounded-md">${etiquetas.join(" • ")}</span>`;
+    } else {
+      banner.classList.add("hidden");
+    }
+  }
 
   let filtrados = AppState.historial.map(det => {
     const materialObj = AppState.datos.materiales.find(m => m.ID_MEMB === det.material);
@@ -1320,19 +1465,20 @@ function renderizarHistorico() {
 
   AppState.historialFiltrado = filtrados;
 
-  if (fechaDesde || fechaHasta) {
-    filtrados = filtrados.filter(item => {
-      if (!item.horaCargo) return false;
-      const datePart = item.horaCargo.split(' ')[0], parts = datePart.split('/');
-      if (parts.length !== 3) return true;
-      const itemDateISO = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-      let pasaDesde = true, pasaHasta = true;
-      if (fechaDesde) pasaDesde = itemDateISO >= fechaDesde;
-      if (fechaHasta) pasaHasta = itemDateISO <= fechaHasta;
-      return pasaDesde && pasaHasta;
-    });
+  // 1. Filtro por rango de fechas compartido
+  filtrados = filtrados.filter(item => cumpleRangoFechas(item.horaCargo));
+
+  // 2. Filtro por chip de material seleccionado en Descargos
+  if (materialId) {
+    filtrados = filtrados.filter(item => item.material === materialId);
   }
 
+  // 3. Filtro por Alerta SLA (+48h) con deuda pendiente
+  if (soloCriticosSLA) {
+    filtrados = filtrados.filter(item => (parseInt(item.deuda, 10) > 0) && calcularHorasTranscurridas(item.horaCargo) >= 48);
+  }
+
+  // 4. Filtro de búsqueda textual
   if (searchTerm) {
     filtrados = filtrados.filter(item => {
       return (item.idCargo || "").toLowerCase().includes(searchTerm) || (item.materialName || "").toLowerCase().includes(searchTerm) ||
@@ -1397,8 +1543,8 @@ function renderizarHistorico() {
     }
 
     html += `
-      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group">
-        <td class="px-4 py-3.5 font-mono text-gray-500 dark:text-gray-400 text-[11px] cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-300 transition-colors celda-trazabilidad border-l-2 border-transparent hover:border-blue-500" onclick="abrirTrazabilidad(event, '${row.idDetalle}')">
+      <tr onclick="abrirDetalle('${row.idCargo}', '${row.material}')" title="Clic para abrir el cargo y gestionar liquidación" class="hover:bg-blue-50/40 dark:hover:bg-gray-800/70 transition-colors group cursor-pointer">
+        <td class="px-4 py-3.5 font-mono text-gray-500 dark:text-gray-400 text-[11px] hover:bg-blue-100/60 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-300 transition-colors celda-trazabilidad border-l-2 border-transparent hover:border-blue-500" onclick="event.stopPropagation(); abrirTrazabilidad(event, '${row.idDetalle}')">
           <div class="flex items-center gap-1.5" title="Click para ver auditoría">
             <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
             ${row.horaCargo || '--'}
