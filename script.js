@@ -742,9 +742,15 @@ function calcularBadgeSLA(fechaLatina) {
 }
 
 function renderizarCargosFiltrados() {
+  renderizarKPIsDescargos();
+
   let filtrados = [...AppState.cargosActivos];
   const searchTerm = document.getElementById("inBuscarCargo").value.toLowerCase().trim();
   const filtroColumna = document.getElementById("selFiltroColumna").value;
+
+  if (filtroSoloCriticosSLA) {
+    filtrados = filtrados.filter(c => calcularHorasTranscurridas(c.hora) >= 48);
+  }
 
   if (searchTerm) {
     filtrados = filtrados.filter((c) => {
@@ -768,6 +774,136 @@ function renderizarCargosFiltrados() {
     if (valA > valB) return asc ? 1 : -1;
     return 0;
   });
+
+    let filtroSoloCriticosSLA = false;
+
+window.toggleFiltroCriticosSLA = function() {
+  filtroSoloCriticosSLA = !filtroSoloCriticosSLA;
+  renderizarCargosFiltrados();
+};
+
+window.filtrarPorChoferKPI = function(nombreChofer) {
+  const input = document.getElementById("inBuscarCargo");
+  const select = document.getElementById("selFiltroColumna");
+  if (input.value === nombreChofer) {
+    input.value = "";
+    select.value = "todos";
+  } else {
+    select.value = "choferNombre";
+    input.value = nombreChofer;
+  }
+  renderizarCargosFiltrados();
+};
+
+function calcularHorasTranscurridas(fechaLatina) {
+  if (!fechaLatina) return 0;
+  const p = String(fechaLatina).split(/[ \/:-]+/);
+  if (p.length < 3) return 0;
+  const f = new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10), parseInt(p[3] || 0, 10), parseInt(p[4] || 0, 10));
+  return Math.max(0, Math.floor((Date.now() - f.getTime()) / 3600000));
+}
+
+function renderizarKPIsDescargos() {
+  const container = document.getElementById("kpiDescargosContainer");
+  const matContainer = document.getElementById("kpiMaterialesCalle");
+  if (!container || !matContainer) return;
+
+  let totalUnidadesCalle = 0;
+  let totalM3Calle = 0;
+  let viajesCriticos48h = 0;
+  const deudaPorChofer = {};
+  const deudaPorMaterial = {};
+
+  // Mapa rápido O(1) de materiales
+  const matMap = new Map(AppState.datos.materiales.map(m => [m.ID_MEMB, m]));
+
+  AppState.cargosActivos.forEach(cargo => {
+    const horas = calcularHorasTranscurridas(cargo.hora);
+    if (horas >= 48) viajesCriticos48h++;
+
+    let deudaViaje = 0;
+    cargo.detalles.forEach(d => {
+      const lleva = parseInt(d.LLEVA || 0, 10);
+      const devuelve = parseInt(d.DEVUELVE || 0, 10);
+      const deuda = (d.DEUDA !== undefined && d.DEUDA !== "") ? parseInt(d.DEUDA, 10) : (lleva - devuelve);
+
+      if (deuda > 0) {
+        deudaViaje += deuda;
+        totalUnidadesCalle += deuda;
+
+        const matObj = matMap.get(d.MATERIAL);
+        const m3Unit = matObj && matObj.M3 ? parseFloat(String(matObj.M3).replace(",", ".")) : 0;
+        const matNombre = matObj ? matObj.DESCRIPCION : (d.MATERIAL || "Otro");
+
+        totalM3Calle += (m3Unit * deuda);
+        deudaPorMaterial[matNombre] = (deudaPorMaterial[matNombre] || 0) + deuda;
+      }
+    });
+
+    if (deudaViaje > 0) {
+      const ch = cargo.choferNombre || "Desconocido";
+      deudaPorChofer[ch] = (deudaPorChofer[ch] || 0) + deudaViaje;
+    }
+  });
+
+  // Top deudor
+  let topChofer = "Sin deuda";
+  let topDeuda = 0;
+  Object.entries(deudaPorChofer).forEach(([chofer, cant]) => {
+    if (cant > topDeuda) { topDeuda = cant; topChofer = chofer; }
+  });
+
+  container.innerHTML = `
+    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-4 shadow-sm">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Stock en Ruta</p>
+      <div class="flex items-baseline justify-between mt-1">
+        <span class="text-2xl font-black text-gray-900 dark:text-white">${totalUnidadesCalle.toLocaleString()} <span class="text-xs font-medium text-gray-500">und.</span></span>
+        <span class="text-xs font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded">${totalM3Calle.toFixed(2)} m³</span>
+      </div>
+    </div>
+
+    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-4 shadow-sm">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Viajes Activos</p>
+      <div class="flex items-baseline justify-between mt-1">
+        <span class="text-2xl font-black text-emerald-600 dark:text-emerald-400">${AppState.cargosActivos.length}</span>
+        <span class="text-[11px] text-gray-500">Pendientes de retorno</span>
+      </div>
+    </div>
+
+    <div onclick="toggleFiltroCriticosSLA()" title="Clic para filtrar viajes con +48h" class="cursor-pointer transition-all rounded-2xl p-4 shadow-sm border ${filtroSoloCriticosSLA ? 'bg-red-100 dark:bg-red-900/40 border-red-500 ring-2 ring-red-500/40' : 'bg-gray-50 dark:bg-gray-900/70 border-gray-200 dark:border-gray-700/80 hover:border-red-400'}">
+      <div class="flex justify-between items-center">
+        <p class="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Alerta SLA (+48h)</p>
+        <span class="text-[10px] text-gray-400">${filtroSoloCriticosSLA ? 'Filtro activo ✕' : 'Filtrar'}</span>
+      </div>
+      <div class="flex items-baseline justify-between mt-1">
+        <span class="text-2xl font-black ${viajesCriticos48h > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-800 dark:text-gray-200'}">${viajesCriticos48h}</span>
+        <span class="text-[11px] text-gray-500">Retorno demorado</span>
+      </div>
+    </div>
+
+    <div onclick="${topDeuda > 0 ? `filtrarPorChoferKPI('${topChofer.replace(/'/g, "\\'")}')` : ''}" title="Clic para filtrar este chofer" class="cursor-pointer bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 hover:border-pink-400 rounded-2xl p-4 shadow-sm transition-all">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-pink-600 dark:text-pink-400">Mayor Retención</p>
+      <div class="flex items-baseline justify-between mt-1 gap-2">
+        <span class="text-sm font-extrabold text-gray-900 dark:text-white truncate" title="${topChofer}">${topChofer}</span>
+        <span class="text-xs font-black text-pink-600 dark:text-pink-400 shrink-0">${topDeuda} und.</span>
+      </div>
+    </div>
+  `;
+
+  // Chips por tipo de embalaje fuera de planta
+  const materialesKeys = Object.keys(deudaPorMaterial);
+  if (materialesKeys.length === 0) {
+    matContainer.innerHTML = "";
+  } else {
+    matContainer.innerHTML = `<span class="text-[10px] font-bold uppercase text-gray-400 mr-1">En ruta:</span>` +
+      materialesKeys.map(mat => `
+        <span class="inline-flex items-center gap-1.5 text-xs bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 px-2.5 py-1 rounded-lg text-gray-700 dark:text-gray-300 shadow-sm">
+          <span class="truncate max-w-[180px]" title="${mat}">${mat}</span>
+          <strong class="text-blue-600 dark:text-blue-400 font-mono">${deudaPorMaterial[mat]}</strong>
+        </span>
+      `).join("");
+  }
+}
 
   renderizarTablaUI(filtrados);
 }
@@ -1151,6 +1287,88 @@ function renderizarHistorico() {
 
   html += `</tbody></table></div>`;
   grid.innerHTML = html;
+
+function renderizarKPIsHistorico(registrosFiltrados) {
+  const container = document.getElementById("kpiHistoricoContainer");
+  if (!container) return;
+
+  let totalDespachado = 0;
+  let totalDevuelto = 0;
+  let totalPendiente = 0;
+
+  registrosFiltrados.forEach(r => {
+    totalDespachado += (parseInt(r.lleva, 10) || 0);
+    totalDevuelto += (parseInt(r.devuelve, 10) || 0);
+    const d = parseInt(r.deuda, 10) || 0;
+    if (d > 0) totalPendiente += d;
+  });
+
+  const tasaRecuperacion = totalDespachado > 0
+    ? ((totalDevuelto / totalDespachado) * 100).toFixed(1)
+    : "100.0";
+
+  container.innerHTML = `
+    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Despachado (Filtro)</p>
+      <p class="text-xl font-black text-gray-900 dark:text-white mt-0.5">${totalDespachado.toLocaleString()} <span class="text-xs font-normal text-gray-500">und.</span></p>
+    </div>
+
+    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Retornado</p>
+      <p class="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">${totalDevuelto.toLocaleString()} <span class="text-xs font-normal text-gray-500">und.</span></p>
+    </div>
+
+    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Tasa Recuperación</p>
+      <p class="text-xl font-black text-blue-600 dark:text-blue-400 mt-0.5">${tasaRecuperacion}%</p>
+    </div>
+
+    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-pink-600 dark:text-pink-400">Saldo Pendiente</p>
+      <p class="text-xl font-black text-pink-600 dark:text-pink-400 mt-0.5">${totalPendiente.toLocaleString()} <span class="text-xs font-normal text-gray-500">und.</span></p>
+    </div>
+  `;
+}
+
+// Guardamos el último subconjunto filtrado para exportación exacta
+let ultimoHistoricoExportable = [];
+
+window.exportarHistoricoCSV = function() {
+  if (!ultimoHistoricoExportable || ultimoHistoricoExportable.length === 0) {
+    return mostrarAlerta("No hay registros filtrados para exportar.", "warning", "Tabla Vacía");
+  }
+
+  const headers = [
+    "ID_CARGO", "ID_DETALLE", "FECHA_SALIDA", "EMISOR", "DESTINO",
+    "CHOFER", "MATERIAL", "LLEVA", "DEVUELTO", "DEUDA", "ESTADO",
+    "GESTOR_EMISION", "FECHA_DESCARGO", "GESTOR_DESCARGO"
+  ];
+
+  const escapeCSV = (val) => `"${String(val ?? "").replace(/"/g, '""')}"`;
+
+  const rows = ultimoHistoricoExportable.map(r => [
+    r.idCargo, r.idDetalle, r.horaCargo, r.emisorName, r.destinoName,
+    r.choferName, r.materialName, r.lleva, r.devuelve, r.deuda, r.estado,
+    r.gestorCargo, r.horaDescargo, r.gestorDescargo
+  ].map(escapeCSV).join(","));
+
+  // BOM UTF-8 (\uFEFF) para apertura nativa perfecta en Microsoft Excel
+  const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const fechaHoy = new Date().toISOString().slice(0, 10);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `GenLogistics_Kardex_Embalajes_${fechaHoy}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+
+  mostrarToast(`Exportados ${ultimoHistoricoExportable.length} registros a Excel (CSV).`);
+};
+    
 }
 
 // ==========================================
