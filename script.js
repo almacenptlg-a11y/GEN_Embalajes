@@ -649,7 +649,7 @@ async function handleFormSubmit(e) {
 }
 
 // ==========================================
-// 9. MÓDULO DE DESCARGOS (LECTURA INSTANTÁNEA)
+// 9. MÓDULO DE DESCARGOS + SEMÁFORO SLA
 // ==========================================
 document.getElementById("tabEmitir").addEventListener("click", () => {
   document.getElementById("viewEmitir").classList.remove("hidden");
@@ -669,7 +669,7 @@ document.getElementById("tabDescargo").addEventListener("click", () => {
   document.getElementById("tabHistorico").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
   
   renderizarCargosFiltrados();
-  SyncEngine.pullLatestState(); // Revalidación silenciosa
+  SyncEngine.pullLatestState();
 });
 
 document.getElementById("tabHistorico").addEventListener("click", () => {
@@ -681,7 +681,7 @@ document.getElementById("tabHistorico").addEventListener("click", () => {
   document.getElementById("tabDescargo").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
   
   renderizarHistorico();
-  SyncEngine.pullLatestState(); // Revalidación silenciosa
+  SyncEngine.pullLatestState();
 });
 
 document.getElementById("btnRefreshCargos").addEventListener("click", () => {
@@ -709,6 +709,36 @@ function estandarizarFecha(fechaLatina) {
     return `${partes[2]}-${partes[1].padStart(2, "0")}-${partes[0].padStart(2, "0")} ${(partes[3] || "00").padStart(2, "0")}:${(partes[4] || "00").padStart(2, "0")}:${(partes[5] || "00").padStart(2, "0")}`;
   }
   return String(fechaLatina);
+}
+
+/**
+ * Calcula antigüedad del viaje en horas y devuelve badge SLA (O(1))
+ */
+function calcularBadgeSLA(fechaLatina) {
+  if (!fechaLatina) return '';
+  const partes = String(fechaLatina).split(/[ \/:-]+/);
+  if (partes.length < 3) return '';
+
+  const fechaSalida = new Date(
+    parseInt(partes[2], 10),
+    parseInt(partes[1], 10) - 1,
+    parseInt(partes[0], 10),
+    parseInt(partes[3] || 0, 10),
+    parseInt(partes[4] || 0, 10),
+    parseInt(partes[5] || 0, 10)
+  );
+
+  const diffHoras = Math.floor((Date.now() - fechaSalida.getTime()) / (1000 * 60 * 60));
+  if (isNaN(diffHoras) || diffHoras < 0) return '';
+
+  if (diffHoras >= 48) {
+    const dias = Math.floor(diffHoras / 24);
+    return `<span class="bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400 border border-red-300 dark:border-red-500/30 px-2 py-0.5 rounded text-[10px] font-bold font-mono" title="Retorno crítico (+48h)">⚠️ ${dias}d ${diffHoras % 24}h</span>`;
+  }
+  if (diffHoras >= 24) {
+    return `<span class="bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold font-mono" title="Retorno demorado (+24h)">⏳ ${diffHoras}h</span>`;
+  }
+  return `<span class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 px-2 py-0.5 rounded text-[10px] font-mono">${diffHoras}h</span>`;
 }
 
 function renderizarCargosFiltrados() {
@@ -758,7 +788,7 @@ function renderizarTablaUI(cargos) {
             <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('idCargo')">ID Cargo ${getSortIcon("idCargo")}</th>
             <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('placa')">Placa ${getSortIcon("placa")}</th>
             <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('choferNombre')">Chofer ${getSortIcon("choferNombre")}</th>
-            <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('fecha')">Hora Salida ${getSortIcon("hora")}</th>
+            <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('fecha')">Hora Salida / SLA ${getSortIcon("hora")}</th>
             <th class="px-4 py-4 text-center">Estado</th>
           </tr>
         </thead>
@@ -775,6 +805,7 @@ function renderizarTablaUI(cargos) {
 
     const horaSalida = cargo.hora || "--/--/---- --:--:--";
     const isLocal = String(cargo.idCargo).startsWith("LOC-");
+    const slaBadge = calcularBadgeSLA(horaSalida);
     let badgeEstadoHTML = "";
     
     if (totalDeuda > 0) {
@@ -792,14 +823,21 @@ function renderizarTablaUI(cargos) {
     }
 
     html += `
-      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${cargo.idCargo}')" title="Clic para ver detalles">
-        <td class="px-4 py-3 font-mono text-xs flex items-center gap-1.5 ${isLocal ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-500 dark:text-gray-400'}">
-          ${isLocal ? `<span class="w-2 h-2 rounded-full bg-blue-500" title="Pendiente de sincronización"></span>` : ''}
-          ${cargo.idCargo}
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${cargo.idCargo}')" title="Clic para liquidar o auditar">
+        <td class="px-4 py-3 font-mono text-xs ${isLocal ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-500 dark:text-gray-400'}">
+          <div class="flex items-center gap-1.5">
+            ${isLocal ? `<span class="w-2 h-2 rounded-full bg-blue-500" title="Pendiente de sincronización"></span>` : ''}
+            ${cargo.idCargo}
+          </div>
         </td>
         <td class="px-4 py-3"><span class="bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 px-2 py-1 rounded text-xs font-bold">${cargo.placa || "S/N"}</span></td>
         <td class="px-4 py-3 font-bold text-gray-800 dark:text-gray-200 truncate max-w-[200px]">${cargo.choferNombre}</td>
-        <td class="px-4 py-3 text-emerald-600 dark:text-emerald-400/80 font-mono text-xs tracking-wider">${horaSalida}</td>
+        <td class="px-4 py-3 font-mono text-xs tracking-wider">
+          <div class="flex items-center gap-2">
+            <span class="text-emerald-600 dark:text-emerald-400/80">${horaSalida}</span>
+            ${slaBadge}
+          </div>
+        </td>
         <td class="px-4 py-3 text-center align-middle">${badgeEstadoHTML}</td>
       </tr>
     `;
@@ -810,7 +848,7 @@ function renderizarTablaUI(cargos) {
 }
 
 // ==========================================
-// 10. MODAL DETALLE Y LIQUIDACIÓN OPTIMISTA
+// 10. MODAL DETALLE, AUDITORÍA DE FIRMA Y LIQUIDACIÓN 1-TAP
 // ==========================================
 function abrirDetalle(idCargo) {
   const cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
@@ -835,6 +873,7 @@ function abrirDetalle(idCargo) {
   });
 
   document.getElementById("mdlTitleCargo").textContent = cargo.idCargo;
+  document.getElementById("mdlBadgeSLA").innerHTML = calcularBadgeSLA(cargo.hora);
   document.getElementById("mdlChofer").textContent = cargo.choferNombre;
   document.getElementById("mdlHora").textContent = cargo.hora || "--";
   
@@ -842,6 +881,16 @@ function abrirDetalle(idCargo) {
   const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
   document.getElementById("mdlDespacho").textContent = areaCat ? areaCat.REFERENCIA : areaRaw;
   document.getElementById("mdlGestor").textContent = cargo.gestor || "No registrado";
+
+  // Visor de Firma Digital Capturada
+  const firmaContainer = document.getElementById("mdlFirmaContainer");
+  const imgFirma = document.getElementById("mdlImgFirma");
+  if (cargo.firmaCargo && cargo.firmaCargo.length > 20) {
+    imgFirma.src = cargo.firmaCargo;
+    firmaContainer.classList.remove("hidden");
+  } else {
+    firmaContainer.classList.add("hidden");
+  }
 
   const vehiculoObj = AppState.datos.vehiculos.find(v => v.PLACA === cargo.placa);
   let fotoUrl = "https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&q=80&w=800";
@@ -852,11 +901,11 @@ function abrirDetalle(idCargo) {
 
   const mdlBadge = document.getElementById("mdlBadgeDeuda");
   if (totalDeudaViaje > 0) {
-    mdlBadge.innerHTML = `<span class="bg-pink-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 w-fit shadow-lg"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Debe ${totalDeudaViaje} materiales</span>`;
+    mdlBadge.innerHTML = `<span class="bg-pink-600 text-white font-bold px-3 py-1 rounded-lg text-xs flex items-center gap-1.5 w-fit shadow-lg"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Debe ${totalDeudaViaje} und.</span>`;
   } else if (totalDeudaViaje < 0) {
-    mdlBadge.innerHTML = `<span class="bg-amber-500 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg">Excedente: ${Math.abs(totalDeudaViaje)}</span>`;
+    mdlBadge.innerHTML = `<span class="bg-amber-500 text-white font-bold px-3 py-1 rounded-lg text-xs w-fit shadow-lg">Excedente: ${Math.abs(totalDeudaViaje)}</span>`;
   } else {
-    mdlBadge.innerHTML = `<span class="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg">Completado / Sin deuda</span>`;
+    mdlBadge.innerHTML = `<span class="bg-emerald-600 text-white font-bold px-3 py-1 rounded-lg text-xs w-fit shadow-lg">Completado / Sin deuda</span>`;
   }
 
   document.getElementById("mdlDestinosCount").textContent = `(${destinosSet.size})`;
@@ -866,9 +915,9 @@ function abrirDetalle(idCargo) {
 
   document.getElementById("mdlTotalMateriales").outerHTML = `
     <span id="mdlTotalMateriales" class="flex items-center gap-2">
-      <span class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white px-2 py-0.5 rounded text-sm">${totalMaterialesLlevados}</span>
-      <span class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 text-emerald-600 dark:text-emerald-400 font-mono px-2 py-0.5 rounded text-xs shadow-sm">
-        Volumen: ${totalM3Llevado.toFixed(3)} m³
+      <span class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white px-2 py-0.5 rounded text-xs font-bold">${totalMaterialesLlevados}</span>
+      <span class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 text-emerald-600 dark:text-emerald-400 font-mono px-2 py-0.5 rounded text-[11px] shadow-sm">
+        ${totalM3Llevado.toFixed(3)} m³
       </span>
     </span>
   `;
@@ -878,10 +927,10 @@ function abrirDetalle(idCargo) {
       <td class="px-3 py-3 text-gray-600 dark:text-gray-400 align-middle">${det.nombreDestino}</td>
       <td class="px-3 py-3 align-middle">
         <div class="${det.deuda <= 0 ? "text-gray-500" : "text-gray-800 dark:text-gray-200"} font-medium leading-snug">${det.nombreMaterial}</div>
-        <div class="text-[10px] text-emerald-600 dark:text-emerald-400/80 font-mono mt-1">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
+        <div class="text-[10px] text-emerald-600 dark:text-emerald-400/80 font-mono mt-0.5">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
       </td>
       <td class="px-3 py-3 align-middle">
-         <div class="flex items-center justify-center gap-2 md:gap-3 text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg p-1.5 border border-gray-200 dark:border-gray-700 w-max mx-auto">
+         <div class="flex items-center justify-center gap-2 text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg p-1.5 border border-gray-200 dark:border-gray-700 w-max mx-auto">
             <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Lleva</span><span class="text-gray-800 dark:text-white font-bold">${det.lleva}</span></div>
             <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
             <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Devuelto</span><span class="text-emerald-600 dark:text-emerald-400 font-bold">${det.devuelve}</span></div>
@@ -889,10 +938,13 @@ function abrirDetalle(idCargo) {
             <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Deuda</span><span class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-500"} font-bold">${det.deuda}</span></div>
          </div>
       </td>
-      <td class="px-3 py-3 align-middle w-24">
-        <input type="number" min="0" inputmode="numeric" data-id="${det.ID_DETALLE}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
-               class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1.5 text-center text-emerald-600 dark:text-emerald-400 font-bold focus:border-emerald-500 outline-none mdl-return-input transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
-               ${det.deuda <= 0 ? "disabled" : ""}>
+      <td class="px-3 py-3 align-middle w-28">
+        <div class="flex items-center gap-1">
+          <input type="number" min="0" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
+                 class="w-16 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1.5 text-center text-emerald-600 dark:text-emerald-400 font-bold focus:border-emerald-500 outline-none mdl-return-input transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                 ${det.deuda <= 0 ? "disabled" : ""}>
+          ${det.deuda > 0 ? `<button type="button" onclick="setMaxInput(this, ${det.deuda})" title="Completar deuda (${det.deuda})" class="px-1.5 py-1.5 text-[10px] font-bold bg-gray-100 dark:bg-gray-800 hover:bg-emerald-600 hover:text-white text-gray-600 dark:text-gray-300 rounded border border-gray-300 dark:border-gray-600 transition-colors">Max</button>` : ''}
+        </div>
       </td>
     </tr>
   `).join("");
@@ -925,61 +977,38 @@ function abrirDetalle(idCargo) {
   }, 50);
 }
 
-// LIQUIDACIÓN OPTIMISTA EN 0ms
-async function procesarLiquidacionModal(idCargo) {
+// ==========================================
+// HELPERS DE LIQUIDACIÓN 1-TAP
+// ==========================================
+window.setMaxInput = function(btn, deuda) {
+  const input = btn.parentElement.querySelector('input');
+  if (input && !input.disabled) {
+    input.value = deuda;
+    input.classList.add('border-emerald-500');
+  }
+};
+
+window.autollenarDevolucionTotal = function() {
   const inputs = document.querySelectorAll(".mdl-return-input:not([disabled])");
-  const payloadDevolucion = [];
-  inputs.forEach((input) => {
-    const qty = parseInt(input.value);
-    if (qty > 0) payloadDevolucion.push({ id_detalle: input.getAttribute("data-id"), qty: qty });
+  let count = 0;
+  inputs.forEach(input => {
+    const deuda = parseInt(input.getAttribute("data-deuda") || 0, 10);
+    if (deuda > 0) {
+      input.value = deuda;
+      count++;
+    }
   });
-
-  if (payloadDevolucion.length === 0) {
-      return mostrarAlerta("Ingresa al menos una cantidad mayor a 0 en la columna 'Retorna'.", "warning", "Datos Insuficientes");
+  if (count > 0) {
+    mostrarToast(`Autocompletadas ${count} líneas al 100%. Presiona Guardar.`);
+    document.getElementById("btnLiquidarModal").focus();
   }
+};
 
-  // 1. Actualizar estado en memoria e IndexedDB inmediatamente
-  const cargoIndex = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
-  if (cargoIndex !== -1) {
-      const cargo = AppState.cargosActivos[cargoIndex];
-      let deudaRestanteCargo = 0;
-
-      cargo.detalles.forEach(det => {
-          const mov = payloadDevolucion.find(p => p.id_detalle === det.ID_DETALLE);
-          if (mov) {
-              det.DEVUELVE = parseInt(det.DEVUELVE || 0) + mov.qty;
-              det.DEUDA = parseInt(det.LLEVA || 0) - det.DEVUELVE;
-          }
-          deudaRestanteCargo += parseInt(det.DEUDA || 0);
-      });
-
-      // Si el cargo quedó saldado al 100%, lo removemos de pendientes de inmediato
-      if (deudaRestanteCargo <= 0) {
-          AppState.cargosActivos.splice(cargoIndex, 1);
-      }
-
-      await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
-  }
-
-  // 2. Encolar mutación en Outbox (Fire & Forget)
-  await SyncEngine.enqueueMutation('updateDevolucion', {
-      data: payloadDevolucion,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido'
+window.limpiarInputsLiquidacion = function() {
+  document.querySelectorAll(".mdl-return-input:not([disabled])").forEach(input => {
+    input.value = "";
   });
-
-  // 3. Cerrar modal, repintar tabla y mostrar Toast instantáneo
-  cerrarDetalle();
-  renderizarCargosFiltrados();
-  mostrarToast(`Liquidación del cargo ${idCargo} guardada. Sincronizando...`);
-}
-
-function cerrarDetalle() {
-  const modal = document.getElementById("modalDetalle");
-  const modalContent = document.getElementById("modalDetalleContent");
-  modal.classList.add("opacity-0");
-  modalContent.classList.add("scale-95");
-  setTimeout(() => modal.classList.add("hidden"), 300); 
-}
+};
 
 // ==========================================
 // 11. MÓDULO HISTÓRICO (LECTURA INSTANTÁNEA)
