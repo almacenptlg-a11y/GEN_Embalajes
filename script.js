@@ -1,6 +1,6 @@
 /**
- * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics)
- * @architecture Zero-Trust | Offline-First | Optimistic UI (O(1)) | Dual Theme
+ * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics v1.1.0)
+ * @architecture Zero-Trust | Offline-First | Optimistic UI O(1) | Real-Time KPIs & SLA
  */
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-QJ6RZdmQw3gJIt80Y6f4iTKyS7BqhXrgHTGWrO0PiSj4m/exec";
@@ -21,6 +21,7 @@ const AppState = {
   cargoItems: [],
   cargosActivos: [],
   sortConfig: { key: "fecha", asc: false },
+  filtroSoloCriticosSLA: false,
   historial: [],
   historialFiltrado: [],
   sortHistoryConfig: { key: "horaCargo", asc: false } 
@@ -70,7 +71,6 @@ window.addEventListener('message', (event) => {
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
-    // Inicializar Motor IndexedDB y Worker en segundo plano
     await SyncEngine.init({
         apiUrl: API_URL,
         token: API_SECRET_TOKEN,
@@ -117,7 +117,6 @@ function actualizarBadgeSync(pendingCount, isOnline) {
     if (!badgeDesktop || !btnMobile) return;
 
     if (!isOnline) {
-        // Estado Offline
         badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-500/30";
         iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3"></path>`;
         iconDesktop.classList.remove('animate-spin-sync');
@@ -126,7 +125,6 @@ function actualizarBadgeSync(pendingCount, isOnline) {
         btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/20";
         btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500"></span><span>Offline${pendingCount > 0 ? ` (${pendingCount})` : ''}</span>`;
     } else if (pendingCount > 0) {
-        // Sincronizando en segundo plano
         badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-500/30";
         iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>`;
         iconDesktop.classList.add('animate-spin-sync');
@@ -135,7 +133,6 @@ function actualizarBadgeSync(pendingCount, isOnline) {
         btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-500/20";
         btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span><span>Subiendo (${pendingCount})</span>`;
     } else {
-        // Todo al día
         badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 hover:opacity-80";
         iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>`;
         iconDesktop.classList.remove('animate-spin-sync');
@@ -168,7 +165,6 @@ function handleRemoteSyncUpdate({ cargosActivos, historial }) {
 // 4. INICIALIZACIÓN (STALE-WHILE-REVALIDATE)
 // ==========================================
 async function initApp() {
-  // Paso A: Hidratación instantánea (0ms) desde IndexedDB
   const cachedMaestros = await SyncEngine.getCache('maestros');
   const cachedCargos = await SyncEngine.getCache('cargosActivos');
   const cachedHistorial = await SyncEngine.getCache('historial');
@@ -185,7 +181,6 @@ async function initApp() {
       AppState.historial = cachedHistorial;
   }
 
-  // Paso B: Actualización silenciosa desde red (Background Revalidate)
   if (!navigator.onLine) {
       if (!cachedMaestros) mostrarAlerta("Sin conexión y sin caché local. Conéctate a internet la primera vez.", "error", "Modo Offline");
       return;
@@ -201,13 +196,11 @@ async function initApp() {
     await SyncEngine.saveCache('maestros', json.data);
     procesarMaestrosEnMemoria(json.data);
 
-    // Si no había caché previo, construir UI ahora
     if (!cachedMaestros) {
         construirUI();
         initSignaturePad();
     }
 
-    // Pre-cargar datos operativos en segundo plano
     SyncEngine.pullLatestState();
     
   } catch (err) {
@@ -480,7 +473,7 @@ function agregarItemLista() {
   const destinoText = document.getElementById("inDestino").value;
   const materialId = document.getElementById("hdMaterial").value;
   const materialText = document.getElementById("inMaterial").value;
-  const cantidad = parseInt(document.getElementById("inCantidad").value);
+  const cantidad = parseInt(document.getElementById("inCantidad").value, 10);
 
   if (!destinoId) return mostrarAlerta("Selecciona un DESTINO válido.", "warning", "Falta Destino");
   if (!materialId) return mostrarAlerta("Especifica el TIPO DE MATERIAL.", "warning", "Falta Material");
@@ -578,14 +571,11 @@ async function handleFormSubmit(e) {
   if (AppState.cargoItems.length === 0) return mostrarAlerta("Añade al menos un MATERIAL a la lista.", "error", "Lista Vacía");
   if (isSignatureEmpty) return mostrarAlerta("El chofer debe firmar la conformidad.", "error", "Firma Requerida");
 
-  // 1. Compresión Edge de la firma (< 8KB)
   const firmaComprimida = SyncEngine.compressSignature(signaturePad);
   if (!firmaComprimida) return mostrarAlerta("El trazo de firma es demasiado corto.", "error", "Firma Inválida");
 
-  // 2. Generación de ID Local Optimista (LOC-XXXXXX)
   const idLocal = `LOC-${Date.now().toString().slice(-6)}`;
   const choferCat = AppState.datos.choferes.find(c => c.ID_CHFR === chofer);
-  const vehiculoCat = AppState.datos.vehiculos.find(v => v.PLACA === vehiculo);
   const ahora = new Date();
   const fechaFormat = `${ahora.getDate().toString().padStart(2, '0')}/${(ahora.getMonth()+1).toString().padStart(2, '0')}/${ahora.getFullYear()} ${ahora.getHours().toString().padStart(2, '0')}:${ahora.getMinutes().toString().padStart(2, '0')}:${ahora.getSeconds().toString().padStart(2, '0')}`;
 
@@ -596,7 +586,6 @@ async function handleFormSubmit(e) {
       destino: i.destinoId
   }));
 
-  // 3. Actualización Instantánea de Estado Local e IndexedDB
   const nuevoCargoOptimista = {
       idCargo: idLocal,
       isLocalSyncPending: true,
@@ -620,7 +609,6 @@ async function handleFormSubmit(e) {
   AppState.cargosActivos.unshift(nuevoCargoOptimista);
   await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
 
-  // 4. Encolar en Outbox (Fire & Forget en segundo plano)
   await SyncEngine.enqueueMutation('saveCargo', {
       data: {
           localIdRef: idLocal,
@@ -634,12 +622,10 @@ async function handleFormSubmit(e) {
       }
   });
 
-  // 5. Impresión opcional inmediata (sin esperar a Google Sheets)
   if (document.getElementById("chkAutoPrint")?.checked) {
       generarDocumentoImpresion(idLocal);
   }
 
-  // 6. Limpieza instantánea de UI y Feedback Toast
   mostrarToast(`Cargo ${idLocal} registrado. Sincronizando en segundo plano...`);
   document.getElementById("cargoForm").reset();
   ["hdArea", "hdChofer", "hdVehiculo", "hdDestino", "hdMaterial"].forEach((id) => (document.getElementById(id).value = ""));
@@ -649,7 +635,7 @@ async function handleFormSubmit(e) {
 }
 
 // ==========================================
-// 9. MÓDULO DE DESCARGOS + SEMÁFORO SLA
+// 9. MÓDULO DE DESCARGOS, SLA Y KPIs EN TIEMPO REAL
 // ==========================================
 document.getElementById("tabEmitir").addEventListener("click", () => {
   document.getElementById("viewEmitir").classList.remove("hidden");
@@ -711,74 +697,34 @@ function estandarizarFecha(fechaLatina) {
   return String(fechaLatina);
 }
 
-/**
- * Calcula antigüedad del viaje en horas y devuelve badge SLA (O(1))
- */
-function calcularBadgeSLA(fechaLatina) {
-  if (!fechaLatina) return '';
-  const partes = String(fechaLatina).split(/[ \/:-]+/);
-  if (partes.length < 3) return '';
-
-  const fechaSalida = new Date(
-    parseInt(partes[2], 10),
-    parseInt(partes[1], 10) - 1,
-    parseInt(partes[0], 10),
-    parseInt(partes[3] || 0, 10),
-    parseInt(partes[4] || 0, 10),
-    parseInt(partes[5] || 0, 10)
+function calcularHorasTranscurridas(fechaLatina) {
+  if (!fechaLatina) return 0;
+  const p = String(fechaLatina).split(/[ \/:-]+/);
+  if (p.length < 3) return 0;
+  const f = new Date(
+    parseInt(p[2], 10),
+    parseInt(p[1], 10) - 1,
+    parseInt(p[0], 10),
+    parseInt(p[3] || 0, 10),
+    parseInt(p[4] || 0, 10)
   );
-
-  const diffHoras = Math.floor((Date.now() - fechaSalida.getTime()) / (1000 * 60 * 60));
-  if (isNaN(diffHoras) || diffHoras < 0) return '';
-
-  if (diffHoras >= 48) {
-    const dias = Math.floor(diffHoras / 24);
-    return `<span class="bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400 border border-red-300 dark:border-red-500/30 px-2 py-0.5 rounded text-[10px] font-bold font-mono" title="Retorno crítico (+48h)">⚠️ ${dias}d ${diffHoras % 24}h</span>`;
-  }
-  if (diffHoras >= 24) {
-    return `<span class="bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold font-mono" title="Retorno demorado (+24h)">⏳ ${diffHoras}h</span>`;
-  }
-  return `<span class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700 px-2 py-0.5 rounded text-[10px] font-mono">${diffHoras}h</span>`;
+  return Math.max(0, Math.floor((Date.now() - f.getTime()) / 3600000));
 }
 
-function renderizarCargosFiltrados() {
-  renderizarKPIsDescargos();
-
-  let filtrados = [...AppState.cargosActivos];
-  const searchTerm = document.getElementById("inBuscarCargo").value.toLowerCase().trim();
-  const filtroColumna = document.getElementById("selFiltroColumna").value;
-
-  if (filtroSoloCriticosSLA) {
-    filtrados = filtrados.filter(c => calcularHorasTranscurridas(c.hora) >= 48);
+function getBadgeSLA(fechaLatina) {
+  const horas = calcularHorasTranscurridas(fechaLatina);
+  if (horas >= 48) {
+    const dias = Math.floor(horas / 24);
+    return `<span class="ml-1.5 px-1.5 py-0.5 text-[10px] font-black rounded bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-500/30">+${dias}d</span>`;
   }
-
-  if (searchTerm) {
-    filtrados = filtrados.filter((c) => {
-      const valPlaca = String(c.placa || "").toLowerCase();
-      const valChofer = String(c.choferNombre || "").toLowerCase();
-      const valId = String(c.idCargo || "").toLowerCase();
-
-      if (filtroColumna === "placa") return valPlaca.includes(searchTerm);
-      if (filtroColumna === "choferNombre") return valChofer.includes(searchTerm);
-      if (filtroColumna === "idCargo") return valId.includes(searchTerm);
-      return valPlaca.includes(searchTerm) || valChofer.includes(searchTerm) || valId.includes(searchTerm);
-    });
+  if (horas >= 24) {
+    return `<span class="ml-1.5 px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30">+24h</span>`;
   }
-
-  const { key, asc } = AppState.sortConfig;
-  filtrados.sort((a, b) => {
-    const sortKey = key === "hora" || key === "fecha" ? "_horaSort" : key;
-    let valA = String(a[sortKey] || "").toLowerCase();
-    let valB = String(b[sortKey] || "").toLowerCase();
-    if (valA < valB) return asc ? -1 : 1;
-    if (valA > valB) return asc ? 1 : -1;
-    return 0;
-  });
-
-    let filtroSoloCriticosSLA = false;
+  return `<span class="ml-1.5 px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 dark:bg-gray-800 text-gray-500">${horas}h</span>`;
+}
 
 window.toggleFiltroCriticosSLA = function() {
-  filtroSoloCriticosSLA = !filtroSoloCriticosSLA;
+  AppState.filtroSoloCriticosSLA = !AppState.filtroSoloCriticosSLA;
   renderizarCargosFiltrados();
 };
 
@@ -795,14 +741,6 @@ window.filtrarPorChoferKPI = function(nombreChofer) {
   renderizarCargosFiltrados();
 };
 
-function calcularHorasTranscurridas(fechaLatina) {
-  if (!fechaLatina) return 0;
-  const p = String(fechaLatina).split(/[ \/:-]+/);
-  if (p.length < 3) return 0;
-  const f = new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10), parseInt(p[3] || 0, 10), parseInt(p[4] || 0, 10));
-  return Math.max(0, Math.floor((Date.now() - f.getTime()) / 3600000));
-}
-
 function renderizarKPIsDescargos() {
   const container = document.getElementById("kpiDescargosContainer");
   const matContainer = document.getElementById("kpiMaterialesCalle");
@@ -814,7 +752,6 @@ function renderizarKPIsDescargos() {
   const deudaPorChofer = {};
   const deudaPorMaterial = {};
 
-  // Mapa rápido O(1) de materiales
   const matMap = new Map(AppState.datos.materiales.map(m => [m.ID_MEMB, m]));
 
   AppState.cargosActivos.forEach(cargo => {
@@ -846,7 +783,6 @@ function renderizarKPIsDescargos() {
     }
   });
 
-  // Top deudor
   let topChofer = "Sin deuda";
   let topDeuda = 0;
   Object.entries(deudaPorChofer).forEach(([chofer, cant]) => {
@@ -870,10 +806,10 @@ function renderizarKPIsDescargos() {
       </div>
     </div>
 
-    <div onclick="toggleFiltroCriticosSLA()" title="Clic para filtrar viajes con +48h" class="cursor-pointer transition-all rounded-2xl p-4 shadow-sm border ${filtroSoloCriticosSLA ? 'bg-red-100 dark:bg-red-900/40 border-red-500 ring-2 ring-red-500/40' : 'bg-gray-50 dark:bg-gray-900/70 border-gray-200 dark:border-gray-700/80 hover:border-red-400'}">
+    <div onclick="toggleFiltroCriticosSLA()" title="Clic para filtrar viajes con +48h" class="cursor-pointer transition-all rounded-2xl p-4 shadow-sm border ${AppState.filtroSoloCriticosSLA ? 'bg-red-100 dark:bg-red-900/40 border-red-500 ring-2 ring-red-500/40' : 'bg-gray-50 dark:bg-gray-900/70 border-gray-200 dark:border-gray-700/80 hover:border-red-400'}">
       <div class="flex justify-between items-center">
         <p class="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400">Alerta SLA (+48h)</p>
-        <span class="text-[10px] text-gray-400">${filtroSoloCriticosSLA ? 'Filtro activo ✕' : 'Filtrar'}</span>
+        <span class="text-[10px] text-gray-400">${AppState.filtroSoloCriticosSLA ? 'Filtro activo ✕' : 'Filtrar'}</span>
       </div>
       <div class="flex items-baseline justify-between mt-1">
         <span class="text-2xl font-black ${viajesCriticos48h > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-800 dark:text-gray-200'}">${viajesCriticos48h}</span>
@@ -890,7 +826,6 @@ function renderizarKPIsDescargos() {
     </div>
   `;
 
-  // Chips por tipo de embalaje fuera de planta
   const materialesKeys = Object.keys(deudaPorMaterial);
   if (materialesKeys.length === 0) {
     matContainer.innerHTML = "";
@@ -904,6 +839,40 @@ function renderizarKPIsDescargos() {
       `).join("");
   }
 }
+
+function renderizarCargosFiltrados() {
+  renderizarKPIsDescargos();
+
+  let filtrados = [...AppState.cargosActivos];
+  const searchTerm = document.getElementById("inBuscarCargo").value.toLowerCase().trim();
+  const filtroColumna = document.getElementById("selFiltroColumna").value;
+
+  if (AppState.filtroSoloCriticosSLA) {
+    filtrados = filtrados.filter(c => calcularHorasTranscurridas(c.hora) >= 48);
+  }
+
+  if (searchTerm) {
+    filtrados = filtrados.filter((c) => {
+      const valPlaca = String(c.placa || "").toLowerCase();
+      const valChofer = String(c.choferNombre || "").toLowerCase();
+      const valId = String(c.idCargo || "").toLowerCase();
+
+      if (filtroColumna === "placa") return valPlaca.includes(searchTerm);
+      if (filtroColumna === "choferNombre") return valChofer.includes(searchTerm);
+      if (filtroColumna === "idCargo") return valId.includes(searchTerm);
+      return valPlaca.includes(searchTerm) || valChofer.includes(searchTerm) || valId.includes(searchTerm);
+    });
+  }
+
+  const { key, asc } = AppState.sortConfig;
+  filtrados.sort((a, b) => {
+    const sortKey = key === "hora" || key === "fecha" ? "_horaSort" : key;
+    let valA = String(a[sortKey] || "").toLowerCase();
+    let valB = String(b[sortKey] || "").toLowerCase();
+    if (valA < valB) return asc ? -1 : 1;
+    if (valA > valB) return asc ? 1 : -1;
+    return 0;
+  });
 
   renderizarTablaUI(filtrados);
 }
@@ -934,14 +903,13 @@ function renderizarTablaUI(cargos) {
   cargos.forEach((cargo) => {
     let totalDeuda = 0;
     cargo.detalles.forEach((d) => {
-      const lleva = parseInt(d.LLEVA || 0);
-      const devuelve = parseInt(d.DEVUELVE || 0);
-      totalDeuda += parseInt(d.DEUDA !== undefined && d.DEUDA !== "" ? d.DEUDA : lleva - devuelve);
+      const lleva = parseInt(d.LLEVA || 0, 10);
+      const devuelve = parseInt(d.DEVUELVE || 0, 10);
+      totalDeuda += parseInt(d.DEUDA !== undefined && d.DEUDA !== "" ? d.DEUDA : lleva - devuelve, 10);
     });
 
     const horaSalida = cargo.hora || "--/--/---- --:--:--";
     const isLocal = String(cargo.idCargo).startsWith("LOC-");
-    const slaBadge = calcularBadgeSLA(horaSalida);
     let badgeEstadoHTML = "";
     
     if (totalDeuda > 0) {
@@ -959,21 +927,14 @@ function renderizarTablaUI(cargos) {
     }
 
     html += `
-      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${cargo.idCargo}')" title="Clic para liquidar o auditar">
-        <td class="px-4 py-3 font-mono text-xs ${isLocal ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-500 dark:text-gray-400'}">
-          <div class="flex items-center gap-1.5">
-            ${isLocal ? `<span class="w-2 h-2 rounded-full bg-blue-500" title="Pendiente de sincronización"></span>` : ''}
-            ${cargo.idCargo}
-          </div>
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${cargo.idCargo}')" title="Clic para ver detalles y liquidar">
+        <td class="px-4 py-3 font-mono text-xs flex items-center gap-1.5 ${isLocal ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-500 dark:text-gray-400'}">
+          ${isLocal ? `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping" title="Pendiente de sincronización"></span>` : ''}
+          ${cargo.idCargo}
         </td>
         <td class="px-4 py-3"><span class="bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 px-2 py-1 rounded text-xs font-bold">${cargo.placa || "S/N"}</span></td>
         <td class="px-4 py-3 font-bold text-gray-800 dark:text-gray-200 truncate max-w-[200px]">${cargo.choferNombre}</td>
-        <td class="px-4 py-3 font-mono text-xs tracking-wider">
-          <div class="flex items-center gap-2">
-            <span class="text-emerald-600 dark:text-emerald-400/80">${horaSalida}</span>
-            ${slaBadge}
-          </div>
-        </td>
+        <td class="px-4 py-3 text-emerald-600 dark:text-emerald-400/80 font-mono text-xs tracking-wider">${horaSalida}${getBadgeSLA(horaSalida)}</td>
         <td class="px-4 py-3 text-center align-middle">${badgeEstadoHTML}</td>
       </tr>
     `;
@@ -984,8 +945,19 @@ function renderizarTablaUI(cargos) {
 }
 
 // ==========================================
-// 10. MODAL DETALLE, AUDITORÍA DE FIRMA Y LIQUIDACIÓN 1-TAP
+// 10. MODAL DETALLE Y LIQUIDACIÓN OPTIMISTA (1-TAP)
 // ==========================================
+window.autocompletarDevolucionTotal = function() {
+  const inputs = document.querySelectorAll(".mdl-return-input:not([disabled])");
+  if (inputs.length === 0) return;
+
+  inputs.forEach((input) => {
+    const deuda = parseInt(input.getAttribute("data-deuda") || "0", 10);
+    if (deuda > 0) input.value = deuda;
+  });
+  mostrarToast("Deuda completa autocompletada al 100%.");
+};
+
 function abrirDetalle(idCargo) {
   const cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
   if (!cargo) return;
@@ -994,8 +966,8 @@ function abrirDetalle(idCargo) {
   const destinosSet = new Set(), resumenTipos = {};
 
   const detallesProcesados = cargo.detalles.map((d) => {
-    const lleva = parseInt(d.LLEVA || 0), devuelve = parseInt(d.DEVUELVE || 0);
-    const deuda = parseInt(d.DEUDA !== undefined && d.DEUDA !== "" ? d.DEUDA : lleva - devuelve);
+    const lleva = parseInt(d.LLEVA || 0, 10), devuelve = parseInt(d.DEVUELVE || 0, 10);
+    const deuda = parseInt(d.DEUDA !== undefined && d.DEUDA !== "" ? d.DEUDA : lleva - devuelve, 10);
     const destinoCat = AppState.datos.destinos.find((x) => x.ID_DSTN === d.DESTINO);
     const materialCat = AppState.datos.materiales.find((m) => m.ID_MEMB === d.MATERIAL);
     const m3Llevado = (materialCat && materialCat.M3 ? parseFloat(String(materialCat.M3).replace(",", ".")) : 0) * lleva;
@@ -1009,7 +981,6 @@ function abrirDetalle(idCargo) {
   });
 
   document.getElementById("mdlTitleCargo").textContent = cargo.idCargo;
-  document.getElementById("mdlBadgeSLA").innerHTML = calcularBadgeSLA(cargo.hora);
   document.getElementById("mdlChofer").textContent = cargo.choferNombre;
   document.getElementById("mdlHora").textContent = cargo.hora || "--";
   
@@ -1017,16 +988,6 @@ function abrirDetalle(idCargo) {
   const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
   document.getElementById("mdlDespacho").textContent = areaCat ? areaCat.REFERENCIA : areaRaw;
   document.getElementById("mdlGestor").textContent = cargo.gestor || "No registrado";
-
-  // Visor de Firma Digital Capturada
-  const firmaContainer = document.getElementById("mdlFirmaContainer");
-  const imgFirma = document.getElementById("mdlImgFirma");
-  if (cargo.firmaCargo && cargo.firmaCargo.length > 20) {
-    imgFirma.src = cargo.firmaCargo;
-    firmaContainer.classList.remove("hidden");
-  } else {
-    firmaContainer.classList.add("hidden");
-  }
 
   const vehiculoObj = AppState.datos.vehiculos.find(v => v.PLACA === cargo.placa);
   let fotoUrl = "https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&q=80&w=800";
@@ -1037,11 +998,11 @@ function abrirDetalle(idCargo) {
 
   const mdlBadge = document.getElementById("mdlBadgeDeuda");
   if (totalDeudaViaje > 0) {
-    mdlBadge.innerHTML = `<span class="bg-pink-600 text-white font-bold px-3 py-1 rounded-lg text-xs flex items-center gap-1.5 w-fit shadow-lg"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Debe ${totalDeudaViaje} und.</span>`;
+    mdlBadge.innerHTML = `<span class="bg-pink-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 w-fit shadow-lg"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Debe ${totalDeudaViaje} materiales</span>`;
   } else if (totalDeudaViaje < 0) {
-    mdlBadge.innerHTML = `<span class="bg-amber-500 text-white font-bold px-3 py-1 rounded-lg text-xs w-fit shadow-lg">Excedente: ${Math.abs(totalDeudaViaje)}</span>`;
+    mdlBadge.innerHTML = `<span class="bg-amber-500 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg">Excedente: ${Math.abs(totalDeudaViaje)}</span>`;
   } else {
-    mdlBadge.innerHTML = `<span class="bg-emerald-600 text-white font-bold px-3 py-1 rounded-lg text-xs w-fit shadow-lg">Completado / Sin deuda</span>`;
+    mdlBadge.innerHTML = `<span class="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg">Completado / Sin deuda</span>`;
   }
 
   document.getElementById("mdlDestinosCount").textContent = `(${destinosSet.size})`;
@@ -1051,9 +1012,9 @@ function abrirDetalle(idCargo) {
 
   document.getElementById("mdlTotalMateriales").outerHTML = `
     <span id="mdlTotalMateriales" class="flex items-center gap-2">
-      <span class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white px-2 py-0.5 rounded text-xs font-bold">${totalMaterialesLlevados}</span>
-      <span class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 text-emerald-600 dark:text-emerald-400 font-mono px-2 py-0.5 rounded text-[11px] shadow-sm">
-        ${totalM3Llevado.toFixed(3)} m³
+      <span class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white px-2 py-0.5 rounded text-sm">${totalMaterialesLlevados}</span>
+      <span class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 text-emerald-600 dark:text-emerald-400 font-mono px-2 py-0.5 rounded text-xs shadow-sm">
+        Vol: ${totalM3Llevado.toFixed(3)} m³
       </span>
     </span>
   `;
@@ -1063,10 +1024,10 @@ function abrirDetalle(idCargo) {
       <td class="px-3 py-3 text-gray-600 dark:text-gray-400 align-middle">${det.nombreDestino}</td>
       <td class="px-3 py-3 align-middle">
         <div class="${det.deuda <= 0 ? "text-gray-500" : "text-gray-800 dark:text-gray-200"} font-medium leading-snug">${det.nombreMaterial}</div>
-        <div class="text-[10px] text-emerald-600 dark:text-emerald-400/80 font-mono mt-0.5">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
+        <div class="text-[10px] text-emerald-600 dark:text-emerald-400/80 font-mono mt-1">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
       </td>
       <td class="px-3 py-3 align-middle">
-         <div class="flex items-center justify-center gap-2 text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg p-1.5 border border-gray-200 dark:border-gray-700 w-max mx-auto">
+         <div class="flex items-center justify-center gap-2 md:gap-3 text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg p-1.5 border border-gray-200 dark:border-gray-700 w-max mx-auto">
             <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Lleva</span><span class="text-gray-800 dark:text-white font-bold">${det.lleva}</span></div>
             <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
             <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Devuelto</span><span class="text-emerald-600 dark:text-emerald-400 font-bold">${det.devuelve}</span></div>
@@ -1074,13 +1035,10 @@ function abrirDetalle(idCargo) {
             <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Deuda</span><span class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-500"} font-bold">${det.deuda}</span></div>
          </div>
       </td>
-      <td class="px-3 py-3 align-middle w-28">
-        <div class="flex items-center gap-1">
-          <input type="number" min="0" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
-                 class="w-16 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1.5 text-center text-emerald-600 dark:text-emerald-400 font-bold focus:border-emerald-500 outline-none mdl-return-input transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                 ${det.deuda <= 0 ? "disabled" : ""}>
-          ${det.deuda > 0 ? `<button type="button" onclick="setMaxInput(this, ${det.deuda})" title="Completar deuda (${det.deuda})" class="px-1.5 py-1.5 text-[10px] font-bold bg-gray-100 dark:bg-gray-800 hover:bg-emerald-600 hover:text-white text-gray-600 dark:text-gray-300 rounded border border-gray-300 dark:border-gray-600 transition-colors">Max</button>` : ''}
-        </div>
+      <td class="px-3 py-3 align-middle w-24">
+        <input type="number" min="0" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
+               class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1.5 text-center text-emerald-600 dark:text-emerald-400 font-bold focus:border-emerald-500 outline-none mdl-return-input transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+               ${det.deuda <= 0 ? "disabled" : ""}>
       </td>
     </tr>
   `).join("");
@@ -1088,7 +1046,27 @@ function abrirDetalle(idCargo) {
   const tb = document.getElementById("mdlTablaMateriales");
   tb.innerHTML = tablaHTML;
 
-  document.getElementById("btnLiquidarModal").setAttribute("onclick", `procesarLiquidacionModal('${cargo.idCargo}')`);
+  // Blindaje de integridad referencial para cargos locales (LOC-XXXXXX) aún no confirmados por GAS
+  const esCargoLocalSinSincronizar = String(cargo.idCargo).startsWith("LOC-");
+  const btnLiq = document.getElementById("btnLiquidarModal");
+  const btnTodo = document.getElementById("btnDevolverTodoModal");
+  const avisoLocal = document.getElementById("mdlAvisoLocalSync");
+
+  if (esCargoLocalSinSincronizar) {
+    btnLiq.disabled = true;
+    btnLiq.classList.add("opacity-50", "cursor-not-allowed");
+    btnTodo.disabled = true;
+    btnTodo.classList.add("opacity-50", "cursor-not-allowed");
+    if (avisoLocal) avisoLocal.classList.remove("hidden");
+  } else {
+    btnLiq.disabled = false;
+    btnLiq.classList.remove("opacity-50", "cursor-not-allowed");
+    btnTodo.disabled = false;
+    btnTodo.classList.remove("opacity-50", "cursor-not-allowed");
+    if (avisoLocal) avisoLocal.classList.add("hidden");
+  }
+
+  btnLiq.setAttribute("onclick", `procesarLiquidacionModal('${cargo.idCargo}')`);
   document.getElementById("btnPrintModal").onclick = () => generarDocumentoImpresion(cargo.idCargo);
 
   const inputsRetorna = document.querySelectorAll(".mdl-return-input:not([disabled])");
@@ -1097,7 +1075,7 @@ function abrirDetalle(idCargo) {
       if (e.key === "Enter") {
         e.preventDefault();
         if (index < inputsRetorna.length - 1) inputsRetorna[index + 1].focus();
-        else document.getElementById("btnLiquidarModal").focus();
+        else btnLiq.focus();
       }
     });
   });
@@ -1109,45 +1087,68 @@ function abrirDetalle(idCargo) {
   setTimeout(() => {
     modal.classList.remove("opacity-0");
     modalContent.classList.remove("scale-95");
-    if (inputsRetorna.length > 0) inputsRetorna[0].focus();
+    if (inputsRetorna.length > 0 && !esCargoLocalSinSincronizar) inputsRetorna[0].focus();
   }, 50);
 }
 
-// ==========================================
-// HELPERS DE LIQUIDACIÓN 1-TAP
-// ==========================================
-window.setMaxInput = function(btn, deuda) {
-  const input = btn.parentElement.querySelector('input');
-  if (input && !input.disabled) {
-    input.value = deuda;
-    input.classList.add('border-emerald-500');
+// LIQUIDACIÓN OPTIMISTA EN 0ms
+async function procesarLiquidacionModal(idCargo) {
+  if (String(idCargo).startsWith("LOC-")) {
+      return mostrarAlerta("Este cargo aún está pendiente de sincronización inicial. Espera a que obtenga su código oficial GCM.", "warning", "Sincronización en Curso");
   }
-};
 
-window.autollenarDevolucionTotal = function() {
   const inputs = document.querySelectorAll(".mdl-return-input:not([disabled])");
-  let count = 0;
-  inputs.forEach(input => {
-    const deuda = parseInt(input.getAttribute("data-deuda") || 0, 10);
-    if (deuda > 0) {
-      input.value = deuda;
-      count++;
-    }
+  const payloadDevolucion = [];
+  inputs.forEach((input) => {
+    const qty = parseInt(input.value, 10);
+    if (qty > 0) payloadDevolucion.push({ id_detalle: input.getAttribute("data-id"), qty: qty });
   });
-  if (count > 0) {
-    mostrarToast(`Autocompletadas ${count} líneas al 100%. Presiona Guardar.`);
-    document.getElementById("btnLiquidarModal").focus();
-  }
-};
 
-window.limpiarInputsLiquidacion = function() {
-  document.querySelectorAll(".mdl-return-input:not([disabled])").forEach(input => {
-    input.value = "";
+  if (payloadDevolucion.length === 0) {
+      return mostrarAlerta("Ingresa al menos una cantidad mayor a 0 en la columna 'Retorna'.", "warning", "Datos Insuficientes");
+  }
+
+  const cargoIndex = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
+  if (cargoIndex !== -1) {
+      const cargo = AppState.cargosActivos[cargoIndex];
+      let deudaRestanteCargo = 0;
+
+      cargo.detalles.forEach(det => {
+          const mov = payloadDevolucion.find(p => p.id_detalle === det.ID_DETALLE);
+          if (mov) {
+              det.DEVUELVE = parseInt(det.DEVUELVE || 0, 10) + mov.qty;
+              det.DEUDA = parseInt(det.LLEVA || 0, 10) - det.DEVUELVE;
+          }
+          deudaRestanteCargo += parseInt(det.DEUDA || 0, 10);
+      });
+
+      if (deudaRestanteCargo <= 0) {
+          AppState.cargosActivos.splice(cargoIndex, 1);
+      }
+
+      await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
+  }
+
+  await SyncEngine.enqueueMutation('updateDevolucion', {
+      data: payloadDevolucion,
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido'
   });
-};
+
+  cerrarDetalle();
+  renderizarCargosFiltrados();
+  mostrarToast(`Liquidación del cargo ${idCargo} guardada. Sincronizando...`);
+}
+
+function cerrarDetalle() {
+  const modal = document.getElementById("modalDetalle");
+  const modalContent = document.getElementById("modalDetalleContent");
+  modal.classList.add("opacity-0");
+  modalContent.classList.add("scale-95");
+  setTimeout(() => modal.classList.add("hidden"), 300); 
+}
 
 // ==========================================
-// 11. MÓDULO HISTÓRICO (LECTURA INSTANTÁNEA)
+// 11. MÓDULO HISTÓRICO, KPIs Y EXPORTADOR CSV
 // ==========================================
 document.getElementById("btnRefreshHistorico").addEventListener("click", () => {
     mostrarToast("Actualizando histórico...");
@@ -1167,6 +1168,85 @@ function getHistorySortIcon(key) {
   if (AppState.sortHistoryConfig.key !== key) return `<span class="text-gray-400 dark:text-gray-600 ml-1">↕</span>`;
   return AppState.sortHistoryConfig.asc ? `<span class="text-blue-600 dark:text-blue-400 ml-1">↑</span>` : `<span class="text-blue-600 dark:text-blue-400 ml-1">↓</span>`;
 }
+
+function renderizarKPIsHistorico(registrosFiltrados) {
+  const container = document.getElementById("kpiHistoricoContainer");
+  if (!container) return;
+
+  let totalDespachado = 0;
+  let totalDevuelto = 0;
+  let totalPendiente = 0;
+
+  registrosFiltrados.forEach(r => {
+    totalDespachado += (parseInt(r.lleva, 10) || 0);
+    totalDevuelto += (parseInt(r.devuelve, 10) || 0);
+    const d = parseInt(r.deuda, 10) || 0;
+    if (d > 0) totalPendiente += d;
+  });
+
+  const tasaRecuperacion = totalDespachado > 0
+    ? ((totalDevuelto / totalDespachado) * 100).toFixed(1)
+    : "100.0";
+
+  container.innerHTML = `
+    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Despachado (Filtro)</p>
+      <p class="text-xl font-black text-gray-900 dark:text-white mt-0.5">${totalDespachado.toLocaleString()} <span class="text-xs font-normal text-gray-500">und.</span></p>
+    </div>
+
+    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Retornado</p>
+      <p class="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">${totalDevuelto.toLocaleString()} <span class="text-xs font-normal text-gray-500">und.</span></p>
+    </div>
+
+    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Tasa Recuperación</p>
+      <p class="text-xl font-black text-blue-600 dark:text-blue-400 mt-0.5">${tasaRecuperacion}%</p>
+    </div>
+
+    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-pink-600 dark:text-pink-400">Saldo Pendiente</p>
+      <p class="text-xl font-black text-pink-600 dark:text-pink-400 mt-0.5">${totalPendiente.toLocaleString()} <span class="text-xs font-normal text-gray-500">und.</span></p>
+    </div>
+  `;
+}
+
+let ultimoHistoricoExportable = [];
+
+window.exportarHistoricoCSV = function() {
+  if (!ultimoHistoricoExportable || ultimoHistoricoExportable.length === 0) {
+    return mostrarAlerta("No hay registros filtrados para exportar.", "warning", "Tabla Vacía");
+  }
+
+  const headers = [
+    "ID_CARGO", "ID_DETALLE", "FECHA_SALIDA", "EMISOR", "DESTINO",
+    "CHOFER", "MATERIAL", "LLEVA", "DEVUELTO", "DEUDA", "ESTADO",
+    "GESTOR_EMISION", "FECHA_DESCARGO", "GESTOR_DESCARGO"
+  ];
+
+  const escapeCSV = (val) => `"${String(val ?? "").replace(/"/g, '""')}"`;
+
+  const rows = ultimoHistoricoExportable.map(r => [
+    r.idCargo, r.idDetalle, r.horaCargo, r.emisorName, r.destinoName,
+    r.choferName, r.materialName, r.lleva, r.devuelve, r.deuda, r.estado,
+    r.gestorCargo, r.horaDescargo, r.gestorDescargo
+  ].map(escapeCSV).join(","));
+
+  const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const fechaHoy = new Date().toISOString().slice(0, 10);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `GenLogistics_Kardex_Embalajes_${fechaHoy}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+
+  mostrarToast(`Exportados ${ultimoHistoricoExportable.length} registros a Excel (CSV).`);
+};
 
 function renderizarHistorico() {
   const grid = document.getElementById("gridHistorico");
@@ -1229,6 +1309,9 @@ function renderizarHistorico() {
     return 0;
   });
 
+  ultimoHistoricoExportable = filtrados;
+  renderizarKPIsHistorico(filtrados);
+
   if (filtrados.length === 0) {
     grid.innerHTML = `<div class="text-center text-gray-500 dark:text-gray-400 py-12 font-bold bg-white dark:bg-gray-800/40 rounded-2xl border border-gray-200 dark:border-gray-700/50 italic mx-4 md:mx-0">No se encontraron movimientos que coincidan con los filtros.</div>`;
     return;
@@ -1255,7 +1338,7 @@ function renderizarHistorico() {
 
   filtrados.forEach(row => {
     let badgeEstadoHTML = "";
-    const deuda = parseInt(row.deuda);
+    const deuda = parseInt(row.deuda, 10);
     
     if (deuda > 0) {
       badgeEstadoHTML = `<span class="bg-pink-50 dark:bg-pink-600/20 text-pink-600 dark:text-pink-400 border border-pink-200 dark:border-pink-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Pendiente</span>`;
@@ -1287,88 +1370,6 @@ function renderizarHistorico() {
 
   html += `</tbody></table></div>`;
   grid.innerHTML = html;
-
-function renderizarKPIsHistorico(registrosFiltrados) {
-  const container = document.getElementById("kpiHistoricoContainer");
-  if (!container) return;
-
-  let totalDespachado = 0;
-  let totalDevuelto = 0;
-  let totalPendiente = 0;
-
-  registrosFiltrados.forEach(r => {
-    totalDespachado += (parseInt(r.lleva, 10) || 0);
-    totalDevuelto += (parseInt(r.devuelve, 10) || 0);
-    const d = parseInt(r.deuda, 10) || 0;
-    if (d > 0) totalPendiente += d;
-  });
-
-  const tasaRecuperacion = totalDespachado > 0
-    ? ((totalDevuelto / totalDespachado) * 100).toFixed(1)
-    : "100.0";
-
-  container.innerHTML = `
-    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
-      <p class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Despachado (Filtro)</p>
-      <p class="text-xl font-black text-gray-900 dark:text-white mt-0.5">${totalDespachado.toLocaleString()} <span class="text-xs font-normal text-gray-500">und.</span></p>
-    </div>
-
-    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
-      <p class="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Retornado</p>
-      <p class="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">${totalDevuelto.toLocaleString()} <span class="text-xs font-normal text-gray-500">und.</span></p>
-    </div>
-
-    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
-      <p class="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">Tasa Recuperación</p>
-      <p class="text-xl font-black text-blue-600 dark:text-blue-400 mt-0.5">${tasaRecuperacion}%</p>
-    </div>
-
-    <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
-      <p class="text-[10px] font-bold uppercase tracking-wider text-pink-600 dark:text-pink-400">Saldo Pendiente</p>
-      <p class="text-xl font-black text-pink-600 dark:text-pink-400 mt-0.5">${totalPendiente.toLocaleString()} <span class="text-xs font-normal text-gray-500">und.</span></p>
-    </div>
-  `;
-}
-
-// Guardamos el último subconjunto filtrado para exportación exacta
-let ultimoHistoricoExportable = [];
-
-window.exportarHistoricoCSV = function() {
-  if (!ultimoHistoricoExportable || ultimoHistoricoExportable.length === 0) {
-    return mostrarAlerta("No hay registros filtrados para exportar.", "warning", "Tabla Vacía");
-  }
-
-  const headers = [
-    "ID_CARGO", "ID_DETALLE", "FECHA_SALIDA", "EMISOR", "DESTINO",
-    "CHOFER", "MATERIAL", "LLEVA", "DEVUELTO", "DEUDA", "ESTADO",
-    "GESTOR_EMISION", "FECHA_DESCARGO", "GESTOR_DESCARGO"
-  ];
-
-  const escapeCSV = (val) => `"${String(val ?? "").replace(/"/g, '""')}"`;
-
-  const rows = ultimoHistoricoExportable.map(r => [
-    r.idCargo, r.idDetalle, r.horaCargo, r.emisorName, r.destinoName,
-    r.choferName, r.materialName, r.lleva, r.devuelve, r.deuda, r.estado,
-    r.gestorCargo, r.horaDescargo, r.gestorDescargo
-  ].map(escapeCSV).join(","));
-
-  // BOM UTF-8 (\uFEFF) para apertura nativa perfecta en Microsoft Excel
-  const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\r\n");
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-
-  const fechaHoy = new Date().toISOString().slice(0, 10);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `GenLogistics_Kardex_Embalajes_${fechaHoy}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-
-  mostrarToast(`Exportados ${ultimoHistoricoExportable.length} registros a Excel (CSV).`);
-};
-    
 }
 
 // ==========================================
@@ -1463,7 +1464,7 @@ function generarDocumentoImpresion(idCargo) {
   const resumenTipos = {};
 
   const filasTablaHTML = cargo.detalles.map((d) => {
-      const lleva = parseInt(d.LLEVA || 0);
+      const lleva = parseInt(d.LLEVA || 0, 10);
       totalLlevado += lleva;
       const destinoCat = AppState.datos.destinos.find((x) => x.ID_DSTN === d.DESTINO);
       const nombreDestino = destinoCat ? destinoCat.REFERENCIA : d.DESTINO || "Desconocido";
@@ -1488,7 +1489,7 @@ function generarDocumentoImpresion(idCargo) {
 
   const destinosHTML = Array.from(destinosSet).map((dest) => `<div>• ${dest}</div>`).join("");
   const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span style="font-weight:700; margin-right:4px;">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
-  const areaRaw = cargo.detalles[0]?.AREA || cargo.area || "Almacén PT";
+  const areaRaw = cargo.detalles[0]?.EMISOR || cargo.area || "Almacén PT";
   const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
   const areaResponsable = areaCat ? areaCat.REFERENCIA : areaRaw;
 
