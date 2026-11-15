@@ -362,6 +362,216 @@ window.cerrarAlerta = function () {
 };
 
 // ==========================================
+// 6.1 MOTOR DE DIÁLOGOS ASÍNCRONOS (GenDialog)
+// ==========================================
+const GenDialog = (() => {
+  let modalEl = null;
+
+  function ensureDOM() {
+    if (modalEl) return modalEl;
+
+    modalEl = document.createElement('div');
+    modalEl.id = 'gen-custom-dialog';
+    modalEl.className = 'fixed inset-0 z-[120] hidden flex items-center justify-center p-4 bg-gray-950/75 backdrop-blur-sm opacity-0 transition-opacity duration-200';
+    modalEl.innerHTML = `
+      <div id="gen-dialog-card" class="w-full max-w-md bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700/80 rounded-2xl shadow-2xl overflow-hidden transform scale-95 transition-all duration-200">
+        <div class="p-5 sm:p-6">
+          <div class="flex items-start gap-4">
+            <div id="gen-dialog-icon" class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"></div>
+            <div class="flex-1 min-w-0">
+              <span id="gen-dialog-badge" class="inline-block text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded mb-1"></span>
+              <h3 id="gen-dialog-title" class="text-base font-extrabold text-gray-900 dark:text-white leading-snug"></h3>
+              <p id="gen-dialog-msg" class="text-xs text-gray-600 dark:text-gray-300 mt-1.5 leading-relaxed"></p>
+            </div>
+          </div>
+
+          <div id="gen-dialog-inputs" class="hidden mt-5 pt-4 border-t border-gray-100 dark:border-gray-800 space-y-3"></div>
+        </div>
+
+        <div class="px-5 py-3.5 bg-gray-50 dark:bg-gray-800/70 border-t border-gray-200 dark:border-gray-800 flex items-center justify-end gap-2.5">
+          <button type="button" id="gen-dialog-cancel" class="px-4 py-2.5 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 transition-colors focus:outline-none">
+            Cancelar
+          </button>
+          <button type="button" id="gen-dialog-confirm" class="px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-lg transition-all focus:outline-none flex items-center gap-1.5">
+            Confirmar
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modalEl);
+    return modalEl;
+  }
+
+  function close(resolver, value) {
+    const card = document.getElementById('gen-dialog-card');
+    modalEl.classList.add('opacity-0');
+    card.classList.add('scale-95');
+    setTimeout(() => {
+      modalEl.classList.add('hidden');
+      resolver(value);
+    }, 180);
+  }
+
+  /**
+   * Diálogo de Confirmación (Reemplaza window.confirm)
+   */
+  function confirm({ title, message, badge = 'Confirmación', confirmText = 'Sí, eliminar', variant = 'danger' }) {
+    return new Promise((resolve) => {
+      ensureDOM();
+      const iconBox = document.getElementById('gen-dialog-icon');
+      const badgeEl = document.getElementById('gen-dialog-badge');
+      const titleEl = document.getElementById('gen-dialog-title');
+      const msgEl = document.getElementById('gen-dialog-msg');
+      const inputsBox = document.getElementById('gen-dialog-inputs');
+      const btnCancel = document.getElementById('gen-dialog-cancel');
+      const btnConfirm = document.getElementById('gen-dialog-confirm');
+
+      inputsBox.classList.add('hidden');
+      inputsBox.innerHTML = '';
+
+      if (variant === 'danger') {
+        iconBox.className = 'w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-red-100 dark:bg-red-500/15 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/30';
+        iconBox.innerHTML = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`;
+        badgeEl.className = 'inline-block text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded mb-1 bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-300';
+        btnConfirm.className = 'px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-500 shadow-lg shadow-red-600/25 transition-all focus:outline-none';
+      } else {
+        iconBox.className = 'w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-amber-100 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30';
+        iconBox.innerHTML = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>`;
+        badgeEl.className = 'inline-block text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded mb-1 bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300';
+        btnConfirm.className = 'px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-all focus:outline-none';
+      }
+
+      badgeEl.textContent = badge;
+      titleEl.textContent = title;
+      msgEl.innerHTML = message;
+      btnConfirm.textContent = confirmText;
+
+      const onConfirm = () => { cleanup(); close(resolve, true); };
+      const onCancel = () => { cleanup(); close(resolve, false); };
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); onCancel(); }
+        if (e.key === 'Enter') { e.preventDefault(); onConfirm(); }
+      };
+
+      function cleanup() {
+        btnConfirm.removeEventListener('click', onConfirm);
+        btnCancel.removeEventListener('click', onCancel);
+        document.removeEventListener('keydown', onKey, true);
+      }
+
+      btnConfirm.addEventListener('click', onConfirm);
+      btnCancel.addEventListener('click', onCancel);
+      document.addEventListener('keydown', onKey, true);
+
+      modalEl.classList.remove('hidden');
+      requestAnimationFrame(() => {
+        modalEl.classList.remove('opacity-0');
+        document.getElementById('gen-dialog-card').classList.remove('scale-95');
+        btnCancel.focus();
+      });
+    });
+  }
+
+  /**
+   * Diálogo Dual de Edición de Cantidades (Reemplaza los 2 window.prompt seguidos)
+   */
+  function editQuantities({ idDetalle, llevaActual, devuelveActual }) {
+    return new Promise((resolve) => {
+      ensureDOM();
+      const iconBox = document.getElementById('gen-dialog-icon');
+      const badgeEl = document.getElementById('gen-dialog-badge');
+      const titleEl = document.getElementById('gen-dialog-title');
+      const msgEl = document.getElementById('gen-dialog-msg');
+      const inputsBox = document.getElementById('gen-dialog-inputs');
+      const btnCancel = document.getElementById('gen-dialog-cancel');
+      const btnConfirm = document.getElementById('gen-dialog-confirm');
+
+      iconBox.className = 'w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-blue-100 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-500/30';
+      iconBox.innerHTML = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>`;
+      badgeEl.className = 'inline-block text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded mb-1 bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300';
+      badgeEl.textContent = `Línea ${idDetalle}`;
+      titleEl.textContent = 'Corregir Cantidades del Movimiento';
+      msgEl.textContent = 'Ajusta las unidades despachadas o retornadas. El saldo de deuda se recalculará automáticamente.';
+
+      inputsBox.classList.remove('hidden');
+      inputsBox.innerHTML = `
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-gray-50 dark:bg-gray-800/80 p-3 rounded-xl border border-gray-200 dark:border-gray-700">
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Lleva (Salida)</label>
+            <input id="dlg-in-lleva" type="number" min="0" inputmode="numeric" value="${llevaActual}"
+              class="w-full bg-white dark:bg-gray-950 border-2 border-gray-300 dark:border-gray-600 focus:border-blue-500 rounded-xl px-3 py-2 text-center text-lg font-black text-gray-900 dark:text-white outline-none transition-colors">
+          </div>
+          <div class="bg-gray-50 dark:bg-gray-800/80 p-3 rounded-xl border border-gray-200 dark:border-gray-700">
+            <label class="block text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 mb-1.5">Devuelto (Retorno)</label>
+            <input id="dlg-in-devuelve" type="number" min="0" inputmode="numeric" value="${devuelveActual}"
+              class="w-full bg-white dark:bg-gray-950 border-2 border-gray-300 dark:border-gray-600 focus:border-emerald-500 rounded-xl px-3 py-2 text-center text-lg font-black text-emerald-600 dark:text-emerald-400 outline-none transition-colors">
+          </div>
+        </div>
+        <div class="flex items-center justify-between px-3 py-2 rounded-xl bg-gray-100 dark:bg-gray-800/50 text-xs">
+          <span class="text-gray-500 font-semibold">Nueva Deuda Resultante:</span>
+          <span id="dlg-preview-deuda" class="font-mono font-black text-sm text-gray-900 dark:text-white">${llevaActual - devuelveActual} und.</span>
+        </div>
+      `;
+
+      btnConfirm.className = 'px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-all focus:outline-none';
+      btnConfirm.textContent = 'Guardar Cambios';
+
+      const inLleva = document.getElementById('dlg-in-lleva');
+      const inDev = document.getElementById('dlg-in-devuelve');
+      const previewEl = document.getElementById('dlg-preview-deuda');
+
+      const updatePreview = () => {
+        const l = parseInt(inLleva.value, 10) || 0;
+        const d = parseInt(inDev.value, 10) || 0;
+        const diff = l - d;
+        previewEl.textContent = `${diff} und.`;
+        previewEl.className = `font-mono font-black text-sm ${diff > 0 ? 'text-red-600 dark:text-red-400' : diff < 0 ? 'text-amber-500' : 'text-emerald-600 dark:text-emerald-400'}`;
+      };
+
+      inLleva.addEventListener('input', updatePreview);
+      inDev.addEventListener('input', updatePreview);
+
+      const onConfirm = () => {
+        const l = parseInt(inLleva.value, 10);
+        const d = parseInt(inDev.value, 10);
+        if (isNaN(l) || l < 0 || isNaN(d) || d < 0) {
+          mostrarToast('Ingresa cantidades válidas (0 o mayor).', 'error');
+          return;
+        }
+        cleanup();
+        close(resolve, { lleva: l, devuelve: d });
+      };
+
+      const onCancel = () => { cleanup(); close(resolve, null); };
+      const onKey = (e) => {
+        if (e.key === 'Escape') { e.stopPropagation(); onCancel(); }
+        if (e.key === 'Enter') { e.preventDefault(); onConfirm(); }
+      };
+
+      function cleanup() {
+        btnConfirm.removeEventListener('click', onConfirm);
+        btnCancel.removeEventListener('click', onCancel);
+        document.removeEventListener('keydown', onKey, true);
+      }
+
+      btnConfirm.addEventListener('click', onConfirm);
+      btnCancel.addEventListener('click', onCancel);
+      document.addEventListener('keydown', onKey, true);
+
+      modalEl.classList.remove('hidden');
+      requestAnimationFrame(() => {
+        modalEl.classList.remove('opacity-0');
+        document.getElementById('gen-dialog-card').classList.remove('scale-95');
+        inLleva.focus();
+        inLleva.select();
+      });
+    });
+  }
+
+  return { confirm, editQuantities };
+})();
+
+// ==========================================
 // 7. AUTOCOMPLETADO Y LISTA DE MATERIALES
 // ==========================================
 let isUIBuilt = false;
@@ -1708,6 +1918,182 @@ document.addEventListener("keydown", (e) => {
 document.getElementById("modalDetalle")?.addEventListener("click", (e) => {
   if (e.target.id === "modalDetalle") cerrarDetalle();
 });
+
+
+// 10.2 CORREGIR CANTIDADES ERRADAS DE UNA LÍNEA (LLEVA / DEVUELVE)
+window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, devuelveActual) {
+  if (String(idDetalle).startsWith("LOC-")) {
+    return mostrarAlerta("Espera unos segundos a que esta línea termine de sincronizarse con la nube.", "warning", "Sincronizando");
+  }
+
+  const resultado = await GenDialog.editQuantities({
+    idDetalle,
+    llevaActual,
+    devuelveActual
+  });
+
+  if (!resultado) return;
+
+  const { lleva: nuevoLleva, devuelve: nuevoDevuelve } = resultado;
+  const nuevaDeuda = nuevoLleva - nuevoDevuelve;
+
+  // Actualizar en cargosActivos
+  let cargoIdx = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
+  if (cargoIdx !== -1) {
+    const det = AppState.cargosActivos[cargoIdx].detalles.find(d => d.ID_DETALLE === idDetalle);
+    if (det) {
+      det.LLEVA = nuevoLleva;
+      det.DEVUELVE = nuevoDevuelve;
+      det.DEUDA = nuevaDeuda;
+    }
+    const tieneSaldo = AppState.cargosActivos[cargoIdx].detalles.some(d => parseInt(d.DEUDA || 0, 10) !== 0);
+    if (!tieneSaldo) {
+      AppState.cargosActivos.splice(cargoIdx, 1);
+    }
+    await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
+  } else if (nuevaDeuda !== 0) {
+    const lineasHist = AppState.historial.filter(h => h.idCargo === idCargo);
+    if (lineasHist.length > 0) {
+      const ref = lineasHist[0];
+      const respId = ref.chofer ? String(ref.chofer).replace(/'/g, "") : "";
+      const choferObj = AppState.datos.choferes.find(c => c.ID_CHFR === respId);
+      AppState.cargosActivos.unshift({
+        idCargo: ref.idCargo,
+        choferId: respId,
+        choferNombre: choferObj ? choferObj.NOMBRE : (ref.chofer || "Desconocido"),
+        placa: ref.placa || "S/N",
+        hora: ref.horaCargo || "--",
+        _horaSort: estandarizarFecha(ref.horaCargo),
+        gestor: ref.gestorCargo || "No registrado",
+        detalles: lineasHist.map(h => ({
+          ID_DETALLE: h.idDetalle,
+          LLEVA: h.idDetalle === idDetalle ? nuevoLleva : h.lleva,
+          DEVUELVE: h.idDetalle === idDetalle ? nuevoDevuelve : h.devuelve,
+          DEUDA: h.idDetalle === idDetalle ? nuevaDeuda : h.deuda,
+          DESTINO: h.destino,
+          MATERIAL: h.material,
+          EMISOR: h.emisor,
+          RESPONSABLE: respId
+        }))
+      });
+      await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
+    }
+  }
+
+  // Actualizar en historial
+  const histItem = AppState.historial.find(h => h.idDetalle === idDetalle);
+  if (histItem) {
+    histItem.lleva = nuevoLleva;
+    histItem.devuelve = nuevoDevuelve;
+    histItem.deuda = nuevaDeuda;
+    histItem.estado = nuevaDeuda > 0 ? "Pendiente" : (nuevaDeuda < 0 ? "Excedente" : "Devolución completa");
+    await SyncEngine.saveCache('historial', AppState.historial);
+  }
+
+  await SyncEngine.enqueueMutation('editDetalleCargo', {
+    data: {
+      idCargo,
+      idDetalle,
+      lleva: nuevoLleva,
+      devuelve: nuevoDevuelve,
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador'
+    }
+  });
+
+  mostrarToast(`Registro ${idDetalle} corregido.`);
+  abrirDetalle(idCargo);
+  renderizarCargosFiltrados();
+  if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
+};
+
+// 10.3 ELIMINAR LÍNEA ERRADA O CARGO COMPLETO
+window.eliminarLineaDetalle = async function (idCargo, idDetalle, nombreMaterial) {
+  if (String(idDetalle).startsWith("LOC-")) {
+    return mostrarAlerta("Espera unos segundos a que la línea se sincronice antes de eliminarla.", "warning", "Sincronizando");
+  }
+
+  const confirmado = await GenDialog.confirm({
+    badge: 'Eliminar Ítem',
+    title: `¿Eliminar "${nombreMaterial}"?`,
+    message: `Se removerá la línea <strong class="font-mono text-gray-900 dark:text-white">${idDetalle}</strong> del cargo <strong class="font-mono text-gray-900 dark:text-white">${idCargo}</strong> y se recalculará el saldo en Google Sheets.`,
+    confirmText: 'Sí, eliminar ítem',
+    variant: 'danger'
+  });
+
+  if (!confirmado) return;
+
+  let cargoVacio = false;
+  const cargoIdx = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
+  if (cargoIdx !== -1) {
+    AppState.cargosActivos[cargoIdx].detalles = AppState.cargosActivos[cargoIdx].detalles.filter(d => d.ID_DETALLE !== idDetalle);
+    if (AppState.cargosActivos[cargoIdx].detalles.length === 0) {
+      AppState.cargosActivos.splice(cargoIdx, 1);
+      cargoVacio = true;
+    } else {
+      const tieneSaldo = AppState.cargosActivos[cargoIdx].detalles.some(d => parseInt(d.DEUDA || 0, 10) !== 0);
+      if (!tieneSaldo) AppState.cargosActivos.splice(cargoIdx, 1);
+    }
+    await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
+  }
+
+  AppState.historial = AppState.historial.filter(h => h.idDetalle !== idDetalle);
+  await SyncEngine.saveCache('historial', AppState.historial);
+
+  if (AppState.historial.filter(h => h.idCargo === idCargo).length === 0) {
+    cargoVacio = true;
+  }
+
+  await SyncEngine.enqueueMutation('deleteDetalleCargo', {
+    data: {
+      idCargo,
+      idDetalle,
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador'
+    }
+  });
+
+  mostrarToast(`Ítem eliminado del cargo ${idCargo}.`);
+  if (cargoVacio) {
+    cerrarDetalle();
+  } else if (document.getElementById("modalDetalle") && !document.getElementById("modalDetalle").classList.contains("hidden")) {
+    abrirDetalle(idCargo);
+  }
+  renderizarCargosFiltrados();
+  if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
+};
+
+window.eliminarCargoCompleto = async function (idCargo) {
+  if (String(idCargo).startsWith("LOC-")) {
+    return mostrarAlerta("El cargo aún se está subiendo a la nube. Espera unos segundos.", "warning", "Sincronizando");
+  }
+
+  const confirmado = await GenDialog.confirm({
+    badge: 'Acción Destructiva',
+    title: `¿Eliminar por completo el cargo ${idCargo}?`,
+    message: 'Esta operación eliminará permanentemente la cabecera y <strong>todos los materiales asociados</strong> en la base de datos de Google Sheets.',
+    confirmText: 'Eliminar Cargo Completo',
+    variant: 'danger'
+  });
+
+  if (!confirmado) return;
+
+  AppState.cargosActivos = AppState.cargosActivos.filter(c => c.idCargo !== idCargo);
+  AppState.historial = AppState.historial.filter(h => h.idCargo !== idCargo);
+
+  await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
+  await SyncEngine.saveCache('historial', AppState.historial);
+
+  await SyncEngine.enqueueMutation('deleteCargo', {
+    data: {
+      idCargo,
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador'
+    }
+  });
+
+  cerrarDetalle();
+  renderizarCargosFiltrados();
+  if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
+  mostrarToast(`Cargo ${idCargo} eliminado correctamente.`);
+};
 
 // ==========================================
 // 11. MÓDULO HISTÓRICO, KPIs Y EXPORTADOR CSV
