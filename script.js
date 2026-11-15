@@ -50,39 +50,59 @@ if (window === window.top) {
   throw new Error("Ejecución bloqueada por política de seguridad (No-Iframe).");
 }
 
-// ==========================================
-// 1.1 MOTOR DE REGLAS DE NEGOCIO Y PERMISOS (RBAC / ABAC)
-// ==========================================
 const AuthRules = {
   norm(str) {
-    return String(str || '').trim().toUpperCase();
+    return String(str || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toUpperCase();
+  },
+
+  extractRawRole() {
+    const u = AppState.user;
+    if (!u) return '';
+    return (
+      u.rol ||
+      u.role ||
+      u.perfil ||
+      u.nivel ||
+      u.tipo ||
+      u.tipoUsuario ||
+      u.cargo ||
+      (u.permisos && (u.permisos.embalajes || u.permisos.rol)) ||
+      ''
+    );
   },
 
   isAdmin() {
-    if (!AppState.user) return false;
-    const rawRol = AppState.user.rol || AppState.user.role || AppState.user.perfil || AppState.user.nivel || AppState.user.tipo || AppState.user.cargo || '';
-    const rol = this.norm(rawRol);
-    if (['ADMIN', 'ADMINISTRADOR', 'SUPERADMIN', 'SISTEMAS', 'TI', 'JEFE'].includes(rol)) return true;
-    if (AppState.user.isAdmin === true || AppState.user.admin === true) return true;
-    return false;
+    const u = AppState.user;
+    if (!u) return false;
+    if (u.isAdmin === true || u.admin === true || u.esAdmin === true) return true;
+
+    const rol = this.norm(this.extractRawRole());
+    if (!rol) return false;
+
+    const adminKeywords = ['ADMIN', 'ADMINISTRADOR', 'SUPERADMIN', 'SISTEMAS', 'TI', 'JEFE', 'GERENTE', 'SUPERVISOR'];
+    return adminKeywords.some(k => rol === k || rol.includes(k));
   },
 
   currentUserName() {
-    return this.norm(AppState.user?.nombre);
+    return this.norm(AppState.user?.nombre || AppState.user?.name || AppState.user?.fullName);
   },
 
   currentUserRole() {
-    if (!AppState.user) return 'OPERADOR';
-    return AppState.user.rol || AppState.user.role || AppState.user.perfil || AppState.user.nivel || 'OPERADOR';
+    if (this.isAdmin()) return 'ADMIN';
+    const raw = this.norm(this.extractRawRole());
+    return raw || 'OPERADOR';
   },
 
-  // Verifica si el cargo tiene al menos 1 unidad devuelta en cualquiera de sus filas
   cargoTieneDevoluciones(cargo) {
     if (!cargo || !Array.isArray(cargo.detalles)) return false;
     return cargo.detalles.some(d => (parseInt(d.DEVUELVE || 0, 10) > 0));
   },
 
-  // 1. Permiso para editar o eliminar una línea específica
   canModifyLinea(cargo, det) {
     if (!AppState.user) return false;
     if (this.isAdmin()) return true;
@@ -91,14 +111,12 @@ const AuthRules = {
     const esCreador = emisorLinea && emisorLinea === this.currentUserName();
     if (!esCreador) return false;
 
-    // Si ya tiene devoluciones registradas en esa línea, solo Admin puede tocarla
     const devuelto = parseInt(det.DEVUELVE || 0, 10);
     if (devuelto > 0) return false;
 
     return true;
   },
 
-  // 2. Permiso para eliminar el cargo completo
   canDeleteCargo(cargo) {
     if (!AppState.user || !cargo) return false;
     if (this.isAdmin()) return true;
@@ -107,13 +125,11 @@ const AuthRules = {
     const esCreador = creadorCargo && creadorCargo === this.currentUserName();
     if (!esCreador) return false;
 
-    // Regla estricta: Ninguna fila debe tener registros de retorno
     if (this.cargoTieneDevoluciones(cargo)) return false;
 
     return true;
   },
 
-  // 3. Permiso para añadir salidas (LLEVA) vs retornos (DEVUELVE) en "Ítem Extra"
   canAddSalidaExtra(cargo) {
     if (!AppState.user || !cargo) return false;
     if (this.isAdmin()) return true;
@@ -176,7 +192,12 @@ function actualizarUIUsuario() {
   if (!AppState.user) return;
   const statusDiv = document.getElementById('status-indicator');
   if (statusDiv) {
-    statusDiv.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> ${AppState.user.nombre} | ${AppState.user.area}`;
+    const esAdmin = AuthRules.isAdmin();
+    const rolBadge = esAdmin
+      ? `<span class="px-1.5 py-0.5 text-[10px] font-black rounded bg-purple-600 text-white tracking-wider">ADMIN</span>`
+      : `<span class="px-1.5 py-0.5 text-[10px] font-bold rounded bg-emerald-600/20 text-emerald-700 dark:text-emerald-300">${AuthRules.currentUserRole()}</span>`;
+
+    statusDiv.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> ${AppState.user.nombre} | ${AppState.user.area || ''} ${rolBadge}`;
     statusDiv.className = "flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3.5 py-1.5 rounded-full border border-emerald-200 dark:border-emerald-400/20 backdrop-blur-md";
   }
   const btnSubmit = document.getElementById('btnSubmit');
@@ -920,7 +941,7 @@ async function handleFormSubmit(e) {
       area,
       firma: firmaComprimida,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
-      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR',
+      gestorRol: AuthRules.currentUserRole()
       gestorCorreo: AppState.user ? AppState.user.usuario : 'almacenpt@lagenovesa.com.pe',
       materiales: materialesPayload
     }
@@ -1479,7 +1500,7 @@ document.getElementById("btnGuardarExtraModal")?.addEventListener("click", async
       emisor: emisorActual,
       responsable: responsableId,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
-      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
+      gestorRol: AuthRules.currentUserRole()
     }
   });
 
@@ -1576,7 +1597,7 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
       lleva: nuevoLleva,
       devuelve: nuevoDevuelve,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
-      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
+      gestorRol: AuthRules.currentUserRole()
     }
   });
 
@@ -1620,7 +1641,7 @@ window.eliminarLineaDetalle = async function (idCargo, idDetalle, nombreMaterial
       idCargo,
       idDetalle,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
-      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
+      gestorRol: AuthRules.currentUserRole()
     }
   });
 
@@ -1651,7 +1672,7 @@ window.eliminarCargoCompleto = async function (idCargo) {
     data: {
       idCargo,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
-      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
+      gestorRol: AuthRules.currentUserRole()
     }
   });
 
@@ -1993,7 +2014,7 @@ async function procesarLiquidacionModal(idCargo) {
   await SyncEngine.enqueueMutation('updateDevolucion', {
     data: payloadDevolucion,
     gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
-    gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
+    gestorRol: AuthRules.currentUserRole()
   });
 
   cerrarDetalle();
@@ -2104,7 +2125,7 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
       lleva: nuevoLleva,
       devuelve: nuevoDevuelve,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
-      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
+      gestorRol: AuthRules.currentUserRole()
     }
   });
 
@@ -2156,7 +2177,7 @@ window.eliminarLineaDetalle = async function (idCargo, idDetalle, nombreMaterial
       idCargo,
       idDetalle,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
-      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
+      gestorRol: AuthRules.currentUserRole()
     }
   });
 
@@ -2195,7 +2216,7 @@ window.eliminarCargoCompleto = async function (idCargo) {
     data: {
       idCargo,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
-      gestorRol: AppState.user ? (AppState.user.rol || 'OPERADOR') : 'OPERADOR'
+      gestorRol: AuthRules.currentUserRole()
     }
   });
 
