@@ -267,7 +267,7 @@
     <section id="viewDescargo"
       class="w-full max-w-6xl bg-white/90 dark:bg-gray-800/50 backdrop-blur-xl border border-gray-200/80 dark:border-gray-700/60 rounded-3xl p-4 md:p-8 shadow-xl dark:shadow-2xl relative hidden transition-opacity duration-300">
       <div
-        class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-gray-200 dark:border-gray-700/50 pb-4">
+        class="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-6 gap-4 border-b border-gray-200 dark:border-gray-700/50 pb-4">
         <h2 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2 shrink-0">
           <svg class="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -276,7 +276,7 @@
           Viajes Pendientes
         </h2>
 
-        <div class="flex flex-col lg:flex-row items-center gap-2 w-full lg:w-auto">
+        <div class="flex flex-col lg:flex-row items-center gap-2 w-full xl:w-auto">
           <!-- Rango de fechas sincronizado -->
           <div
             class="flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 w-full lg:w-auto">
@@ -318,15 +318,16 @@
             </button>
           </div>
         </div>
+      </div>
 
-        <!-- PANEL DE KPIs EN TIEMPO REAL (TRÁNSITO Y SLA) -->
-        <div id="kpiDescargosContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4"></div>
-        <div id="kpiMaterialesCalle" class="flex flex-wrap items-center gap-2 mb-5"></div>
+      <!-- PANEL DE KPIs EN TIEMPO REAL (TRÁNSITO Y SLA) -->
+      <div id="kpiDescargosContainer" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4"></div>
+      <div id="kpiMaterialesCalle" class="flex flex-wrap items-center gap-2 mb-5"></div>
 
-        <!-- Contenedor Edge-to-Edge en móviles -->
-        <div id="gridCargos" class="-mx-4 md:mx-0">
-          <div class="text-center text-gray-500 py-8 italic">Cargando viajes pendientes...</div>
-        </div>
+      <!-- Contenedor Edge-to-Edge en móviles -->
+      <div id="gridCargos" class="-mx-4 md:mx-0">
+        <div class="text-center text-gray-500 py-8 italic">Cargando viajes pendientes...</div>
+      </div>
     </section>
 
     <!-- ==========================================
@@ -335,7 +336,7 @@
     <section id="viewHistorico"
       class="w-full max-w-7xl bg-white/90 dark:bg-gray-800/50 backdrop-blur-xl border border-gray-200/80 dark:border-gray-700/60 rounded-3xl p-4 md:p-8 shadow-xl dark:shadow-2xl relative hidden transition-opacity duration-300">
       <div
-        class="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 border-b border-gray-200 dark:border-gray-700/50 pb-4">
+        class="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-6 gap-4 border-b border-gray-200 dark:border-gray-700/50 pb-4">
         <h2 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2 shrink-0">
           <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -345,17 +346,17 @@
           Historial de Movimientos
         </h2>
 
-        <div class="flex flex-col md:flex-row items-center gap-3 w-full lg:w-auto">
+        <div class="flex flex-col md:flex-row items-center gap-3 w-full xl:w-auto">
 
           <div
             class="flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 w-full md:w-auto">
             <span class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Desde</span>
             <input type="date" id="inDesdeHistorico"
-              class="bg-transparent text-sm text-gray-700 dark:text-gray-300 outline-none w-full md:w-auto">
+              class="bg-transparent text-xs sm:text-sm text-gray-700 dark:text-gray-300 outline-none w-full md:w-auto">
             <div class="w-px h-4 bg-gray-300 dark:bg-gray-700 mx-1"></div>
             <span class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Hasta</span>
             <input type="date" id="inHastaHistorico"
-              class="bg-transparent text-sm text-gray-700 dark:text-gray-300 outline-none w-full md:w-auto">
+              class="bg-transparent text-xs sm:text-sm text-gray-700 dark:text-gray-300 outline-none w-full md:w-auto">
           </div>
 
           <div class="relative flex-1 w-full md:w-64">

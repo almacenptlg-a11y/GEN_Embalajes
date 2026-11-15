@@ -1277,12 +1277,34 @@ async function procesarLiquidacionModal(idCargo) {
   }
 
   // Leer solo desde la vista desktop (que está sincronizada 1:1 con móvil) para evitar duplicados
+
   const inputs = document.querySelectorAll(".mdl-input-desktop:not([disabled])");
   const payloadDevolucion = [];
+  let errorValidacion = null;
+
   inputs.forEach((input) => {
-    const qty = parseInt(input.value, 10);
-    if (qty > 0) payloadDevolucion.push({ id_detalle: input.getAttribute("data-id"), qty: qty });
+    const rawVal = input.value.trim();
+    if (!rawVal) return;
+
+    const qty = parseInt(rawVal, 10);
+    const maxDeuda = parseInt(input.getAttribute("data-deuda") || "0", 10);
+
+    if (isNaN(qty) || qty < 0) {
+      errorValidacion = "No se permiten cantidades negativas o inválidas.";
+      return;
+    }
+    if (qty > maxDeuda) {
+      errorValidacion = `La cantidad a retornar (${qty}) supera la deuda pendiente (${maxDeuda}).`;
+      return;
+    }
+    if (qty > 0) {
+      payloadDevolucion.push({ id_detalle: input.getAttribute("data-id"), qty: qty });
+    }
   });
+
+  if (errorValidacion) {
+    return mostrarAlerta(errorValidacion, "error", "Cantidad Excedida");
+  }
 
   if (payloadDevolucion.length === 0) {
     return mostrarAlerta("Ingresa al menos una cantidad mayor a 0 en la columna 'Retorna'.", "warning", "Datos Insuficientes");
@@ -1321,6 +1343,30 @@ async function procesarLiquidacionModal(idCargo) {
   if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
 }
 
+window.cerrarDetalle = function () {
+  const modal = document.getElementById("modalDetalle");
+  const modalContent = document.getElementById("modalDetalleContent");
+  if (!modal || modal.classList.contains("hidden")) return;
+
+  modal.classList.add("opacity-0");
+  modalContent.classList.add("scale-95");
+  setTimeout(() => {
+    modal.classList.add("hidden");
+  }, 300);
+};
+
+// Cerrar modal con tecla ESC o clic en el backdrop oscuro
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    cerrarDetalle();
+    cerrarAlerta();
+  }
+});
+
+document.getElementById("modalDetalle")?.addEventListener("click", (e) => {
+  if (e.target.id === "modalDetalle") cerrarDetalle();
+});
+
 // ==========================================
 // 11. MÓDULO HISTÓRICO, KPIs Y EXPORTADOR CSV
 // ==========================================
@@ -1329,8 +1375,6 @@ document.getElementById("btnRefreshHistorico").addEventListener("click", () => {
   SyncEngine.processQueue().then(() => SyncEngine.pullLatestState());
 });
 document.getElementById("inBuscarHistorico").addEventListener("input", renderizarHistorico);
-document.getElementById("inDesdeHistorico").addEventListener("change", renderizarHistorico);
-document.getElementById("inHastaHistorico").addEventListener("change", renderizarHistorico);
 
 window.setHistorySort = function (key) {
   if (AppState.sortHistoryConfig.key === key) AppState.sortHistoryConfig.asc = !AppState.sortHistoryConfig.asc;
@@ -1649,8 +1693,30 @@ window.abrirTrazabilidad = function (e, idDetalle) {
 // 13. MOTOR DE IMPRESIÓN OFFLINE-READY
 // ==========================================
 function generarDocumentoImpresion(idCargo) {
-  const cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
-  if (!cargo) return;
+  let cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
+
+  if (!cargo) {
+    const lineasHist = AppState.historial.filter((h) => h.idCargo === idCargo);
+    if (lineasHist.length === 0) return mostrarToast("No se encontraron datos del cargo para imprimir.", "error");
+
+    const ref = lineasHist[0];
+    const idChoferLimpio = ref.chofer ? String(ref.chofer).replace(/'/g, "") : "";
+    const choferObj = AppState.datos.choferes.find((c) => c.ID_CHFR === idChoferLimpio);
+
+    cargo = {
+      idCargo: ref.idCargo,
+      choferNombre: choferObj ? choferObj.NOMBRE : (ref.chofer || "Desconocido"),
+      placa: ref.placa || "S/N",
+      hora: ref.horaCargo || "--",
+      firmaCargo: null,
+      detalles: lineasHist.map((h) => ({
+        LLEVA: h.lleva,
+        DESTINO: h.destino,
+        MATERIAL: h.material,
+        EMISOR: h.emisor
+      }))
+    };
+  }
 
   let totalLlevado = 0;
   let totalM3Llevado = 0;
