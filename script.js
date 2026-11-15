@@ -7,14 +7,14 @@ const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-Q
 const API_SECRET_TOKEN = "GEN_EMB_2026_SECURE_KEY";
 
 const DOMINIO_HUB_PERMITIDO = [
-    "https://almacenptlg-a11y.github.io",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000"
+  "https://almacenptlg-a11y.github.io",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000"
 ];
 
 const AppState = {
-  user: null,               
-  isSessionVerified: false, 
+  user: null,
+  isSessionVerified: false,
   datos: {
     choferes: [], vehiculos: [], destinos: [], materiales: [], areas: []
   },
@@ -24,14 +24,14 @@ const AppState = {
   filtroSoloCriticosSLA: false,
   historial: [],
   historialFiltrado: [],
-  sortHistoryConfig: { key: "horaCargo", asc: false } 
+  sortHistoryConfig: { key: "horaCargo", asc: false }
 };
 
 // ==========================================
 // 1. SEGURIDAD: IFRAME ENFORCER (Anti-Bypass)
 // ==========================================
 if (window === window.top) {
-    document.documentElement.innerHTML = `
+  document.documentElement.innerHTML = `
         <body style="background-color: #111827; color: #ef4444; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: sans-serif; text-align: center;">
             <div>
                 <svg style="width: 80px; height: 80px; margin: 0 auto 20px auto;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
@@ -40,125 +40,125 @@ if (window === window.top) {
             </div>
         </body>
     `;
-    throw new Error("Ejecución bloqueada por política de seguridad (No-Iframe).");
+  throw new Error("Ejecución bloqueada por política de seguridad (No-Iframe).");
 }
 
 // ==========================================
 // 2. SEGURIDAD, TEMA Y ARRANQUE DEL MOTOR
 // ==========================================
 window.addEventListener('message', (event) => {
-    if (!DOMINIO_HUB_PERMITIDO.includes(event.origin)) {
-        console.warn("Bloqueo de seguridad:", event.origin);
-        return;
-    }
+  if (!DOMINIO_HUB_PERMITIDO.includes(event.origin)) {
+    console.warn("Bloqueo de seguridad:", event.origin);
+    return;
+  }
 
-    const { type, user, theme } = event.data || {};
-    
-    if (type === 'THEME_UPDATE') {
-        document.documentElement.classList.toggle('dark', theme === 'dark');
-    }
+  const { type, user, theme } = event.data || {};
 
-    if (type === 'SESSION_SYNC' && user) {
-        document.documentElement.classList.toggle('dark', theme === 'dark');
-        AppState.user = user;
-        AppState.isSessionVerified = true;
-        actualizarUIUsuario();
-        
-        if (AppState.datos.choferes.length === 0) {
-            initApp();
-        }
+  if (type === 'THEME_UPDATE') {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+  }
+
+  if (type === 'SESSION_SYNC' && user) {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    AppState.user = user;
+    AppState.isSessionVerified = true;
+    actualizarUIUsuario();
+
+    if (AppState.datos.choferes.length === 0) {
+      initApp();
     }
+  }
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
-    await SyncEngine.init({
-        apiUrl: API_URL,
-        token: API_SECRET_TOKEN,
-        onQueueChange: actualizarBadgeSync,
-        onRemoteDataSync: handleRemoteSyncUpdate,
-        onSyncError: (msg) => mostrarToast(`Error de sincronización: ${msg}`, 'error')
-    });
+  await SyncEngine.init({
+    apiUrl: API_URL,
+    token: API_SECRET_TOKEN,
+    onQueueChange: actualizarBadgeSync,
+    onRemoteDataSync: handleRemoteSyncUpdate,
+    onSyncError: (msg) => mostrarToast(`Error de sincronización: ${msg}`, 'error')
+  });
 
-    window.parent.postMessage({ type: 'MODULO_LISTO' }, '*');
-    
-    setTimeout(() => {
-        if (!AppState.isSessionVerified) {
-            const statusDiv = document.getElementById('status-indicator');
-            if(statusDiv) {
-                statusDiv.innerHTML = '⚠️ Acceso Restringido';
-                statusDiv.className = "flex items-center gap-2 text-xs font-semibold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-400/10 px-3.5 py-1.5 rounded-full border border-red-200 dark:border-red-400/20 backdrop-blur-md";
-            }
-            const btnSubmit = document.getElementById('btnSubmit');
-            if(btnSubmit) btnSubmit.disabled = true;
-        }
-    }, 4000);
+  window.parent.postMessage({ type: 'MODULO_LISTO' }, '*');
+
+  setTimeout(() => {
+    if (!AppState.isSessionVerified) {
+      const statusDiv = document.getElementById('status-indicator');
+      if (statusDiv) {
+        statusDiv.innerHTML = '⚠️ Acceso Restringido';
+        statusDiv.className = "flex items-center gap-2 text-xs font-semibold text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-400/10 px-3.5 py-1.5 rounded-full border border-red-200 dark:border-red-400/20 backdrop-blur-md";
+      }
+      const btnSubmit = document.getElementById('btnSubmit');
+      if (btnSubmit) btnSubmit.disabled = true;
+    }
+  }, 4000);
 });
 
 function actualizarUIUsuario() {
-    if(!AppState.user) return;
-    const statusDiv = document.getElementById('status-indicator');
-    if (statusDiv) {
-        statusDiv.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> ${AppState.user.nombre} | ${AppState.user.area}`;
-        statusDiv.className = "flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3.5 py-1.5 rounded-full border border-emerald-200 dark:border-emerald-400/20 backdrop-blur-md";
-    }
-    const btnSubmit = document.getElementById('btnSubmit');
-    if(btnSubmit) btnSubmit.disabled = false;
+  if (!AppState.user) return;
+  const statusDiv = document.getElementById('status-indicator');
+  if (statusDiv) {
+    statusDiv.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> ${AppState.user.nombre} | ${AppState.user.area}`;
+    statusDiv.className = "flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-400/10 px-3.5 py-1.5 rounded-full border border-emerald-200 dark:border-emerald-400/20 backdrop-blur-md";
+  }
+  const btnSubmit = document.getElementById('btnSubmit');
+  if (btnSubmit) btnSubmit.disabled = false;
 }
 
 // ==========================================
 // 3. UI DE SINCRONIZACIÓN TIPO APPSHEET
 // ==========================================
 function actualizarBadgeSync(pendingCount, isOnline) {
-    const badgeDesktop = document.getElementById('sync-badge');
-    const iconDesktop = document.getElementById('sync-icon');
-    const textDesktop = document.getElementById('sync-text');
-    const btnMobile = document.getElementById('btnSyncMobile');
+  const badgeDesktop = document.getElementById('sync-badge');
+  const iconDesktop = document.getElementById('sync-icon');
+  const textDesktop = document.getElementById('sync-text');
+  const btnMobile = document.getElementById('btnSyncMobile');
 
-    if (!badgeDesktop || !btnMobile) return;
+  if (!badgeDesktop || !btnMobile) return;
 
-    if (!isOnline) {
-        badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-500/30";
-        iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3"></path>`;
-        iconDesktop.classList.remove('animate-spin-sync');
-        textDesktop.textContent = pendingCount > 0 ? `Offline (${pendingCount} en cola)` : `Modo Offline`;
+  if (!isOnline) {
+    badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-500/30";
+    iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3"></path>`;
+    iconDesktop.classList.remove('animate-spin-sync');
+    textDesktop.textContent = pendingCount > 0 ? `Offline (${pendingCount} en cola)` : `Modo Offline`;
 
-        btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/20";
-        btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500"></span><span>Offline${pendingCount > 0 ? ` (${pendingCount})` : ''}</span>`;
-    } else if (pendingCount > 0) {
-        badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-500/30";
-        iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>`;
-        iconDesktop.classList.add('animate-spin-sync');
-        textDesktop.textContent = `Sincronizando (${pendingCount})...`;
+    btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/20";
+    btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500"></span><span>Offline${pendingCount > 0 ? ` (${pendingCount})` : ''}</span>`;
+  } else if (pendingCount > 0) {
+    badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-500/30";
+    iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>`;
+    iconDesktop.classList.add('animate-spin-sync');
+    textDesktop.textContent = `Sincronizando (${pendingCount})...`;
 
-        btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-500/20";
-        btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span><span>Subiendo (${pendingCount})</span>`;
-    } else {
-        badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 hover:opacity-80";
-        iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>`;
-        iconDesktop.classList.remove('animate-spin-sync');
-        textDesktop.textContent = `Sincronizado`;
+    btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-500/20";
+    btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span><span>Subiendo (${pendingCount})</span>`;
+  } else {
+    badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 hover:opacity-80";
+    iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>`;
+    iconDesktop.classList.remove('animate-spin-sync');
+    textDesktop.textContent = `Sincronizado`;
 
-        btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20";
-        btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span>Al día</span>`;
-    }
+    btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20";
+    btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span>Al día</span>`;
+  }
 }
 
 function handleRemoteSyncUpdate({ cargosActivos, historial }) {
-    if (cargosActivos) {
-        AppState.cargosActivos = cargosActivos.map(cargo => ({
-            ...cargo,
-            _horaSort: estandarizarFecha(cargo.hora)
-        }));
-        if (!document.getElementById('viewDescargo').classList.contains('hidden')) {
-            renderizarCargosFiltrados();
-        }
+  if (cargosActivos) {
+    AppState.cargosActivos = cargosActivos.map(cargo => ({
+      ...cargo,
+      _horaSort: estandarizarFecha(cargo.hora)
+    }));
+    if (!document.getElementById('viewDescargo').classList.contains('hidden')) {
+      renderizarCargosFiltrados();
     }
-    if (historial) {
-        AppState.historial = historial;
-        if (!document.getElementById('viewHistorico').classList.contains('hidden')) {
-            renderizarHistorico();
-        }
+  }
+  if (historial) {
+    AppState.historial = historial;
+    if (!document.getElementById('viewHistorico').classList.contains('hidden')) {
+      renderizarHistorico();
     }
+  }
 }
 
 // ==========================================
@@ -170,20 +170,20 @@ async function initApp() {
   const cachedHistorial = await SyncEngine.getCache('historial');
 
   if (cachedMaestros) {
-      procesarMaestrosEnMemoria(cachedMaestros);
-      construirUI();
-      initSignaturePad();
+    procesarMaestrosEnMemoria(cachedMaestros);
+    construirUI();
+    initSignaturePad();
   }
   if (cachedCargos) {
-      AppState.cargosActivos = cachedCargos.map(c => ({ ...c, _horaSort: estandarizarFecha(c.hora) }));
+    AppState.cargosActivos = cachedCargos.map(c => ({ ...c, _horaSort: estandarizarFecha(c.hora) }));
   }
   if (cachedHistorial) {
-      AppState.historial = cachedHistorial;
+    AppState.historial = cachedHistorial;
   }
 
   if (!navigator.onLine) {
-      if (!cachedMaestros) mostrarAlerta("Sin conexión y sin caché local. Conéctate a internet la primera vez.", "error", "Modo Offline");
-      return;
+    if (!cachedMaestros) mostrarAlerta("Sin conexión y sin caché local. Conéctate a internet la primera vez.", "error", "Modo Offline");
+    return;
   }
 
   try {
@@ -197,27 +197,27 @@ async function initApp() {
     procesarMaestrosEnMemoria(json.data);
 
     if (!cachedMaestros) {
-        construirUI();
-        initSignaturePad();
+      construirUI();
+      initSignaturePad();
     }
 
     SyncEngine.pullLatestState();
-    
+
   } catch (err) {
     console.warn("[InitApp] Falló actualización remota, operando con caché local:", err.message);
     if (!cachedMaestros) {
-        mostrarAlerta("No se pudo descargar la BD inicial: " + err.message, "error", "Error de Red");
+      mostrarAlerta("No se pudo descargar la BD inicial: " + err.message, "error", "Error de Red");
     }
   }
 }
 
 function procesarMaestrosEnMemoria(rawData) {
-    AppState.datos = rawData;
-    AppState.datos.areas = AppState.datos.destinos.filter(d => d.EMISOR && String(d.EMISOR).trim().toUpperCase() === "SI");
-    AppState.datos.vehiculos = AppState.datos.vehiculos.map(v => ({
-        ...v,
-        DISPLAY_NAME: `${v.PLACA} ${v.MARCA || ''}`.trim()
-    }));
+  AppState.datos = rawData;
+  AppState.datos.areas = AppState.datos.destinos.filter(d => d.EMISOR && String(d.EMISOR).trim().toUpperCase() === "SI");
+  AppState.datos.vehiculos = AppState.datos.vehiculos.map(v => ({
+    ...v,
+    DISPLAY_NAME: `${v.PLACA} ${v.MARCA || ''}`.trim()
+  }));
 }
 
 // ==========================================
@@ -232,7 +232,7 @@ function initSignaturePad() {
   if (isSignatureInitialized) return;
   signaturePad = document.getElementById('signaturePad');
   signatureCtx = signaturePad.getContext('2d');
-  
+
   function resizeCanvas() {
     const rect = signaturePad.parentElement.getBoundingClientRect();
     if (rect.width === 0) return;
@@ -241,9 +241,9 @@ function initSignaturePad() {
     signatureCtx.lineCap = 'round';
     signatureCtx.lineJoin = 'round';
     signatureCtx.lineWidth = 3;
-    signatureCtx.strokeStyle = '#000000'; 
+    signatureCtx.strokeStyle = '#000000';
   }
-  
+
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 
@@ -298,31 +298,31 @@ function limpiarFirma() {
 // 6. SISTEMA DE NOTIFICACIONES (TOASTS Y ALERTAS)
 // ==========================================
 function mostrarToast(mensaje, tipo = 'success') {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
+  const container = document.getElementById('toast-container');
+  if (!container) return;
 
-    const toast = document.createElement('div');
-    const isError = tipo === 'error';
-    const bgClass = isError 
-        ? 'bg-red-600 text-white border-red-500' 
-        : 'bg-gray-900 dark:bg-gray-800 text-white border-gray-700 dark:border-gray-600';
-    
-    const iconSvg = isError
-        ? `<svg class="w-5 h-5 text-red-200 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`
-        : `<svg class="w-5 h-5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>`;
+  const toast = document.createElement('div');
+  const isError = tipo === 'error';
+  const bgClass = isError
+    ? 'bg-red-600 text-white border-red-500'
+    : 'bg-gray-900 dark:bg-gray-800 text-white border-gray-700 dark:border-gray-600';
 
-    toast.className = `pointer-events-auto flex items-center gap-3 px-4 py-3.5 rounded-2xl shadow-2xl border ${bgClass} text-xs font-semibold transform translate-y-4 opacity-0 transition-all duration-300`;
-    toast.innerHTML = `${iconSvg}<span class="leading-snug">${mensaje}</span>`;
+  const iconSvg = isError
+    ? `<svg class="w-5 h-5 text-red-200 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`
+    : `<svg class="w-5 h-5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>`;
 
-    container.appendChild(toast);
-    requestAnimationFrame(() => {
-        toast.classList.remove('translate-y-4', 'opacity-0');
-    });
+  toast.className = `pointer-events-auto flex items-center gap-3 px-4 py-3.5 rounded-2xl shadow-2xl border ${bgClass} text-xs font-semibold transform translate-y-4 opacity-0 transition-all duration-300`;
+  toast.innerHTML = `${iconSvg}<span class="leading-snug">${mensaje}</span>`;
 
-    setTimeout(() => {
-        toast.classList.add('translate-y-2', 'opacity-0');
-        setTimeout(() => toast.remove(), 300);
-    }, 3500);
+  container.appendChild(toast);
+  requestAnimationFrame(() => {
+    toast.classList.remove('translate-y-4', 'opacity-0');
+  });
+
+  setTimeout(() => {
+    toast.classList.add('translate-y-2', 'opacity-0');
+    setTimeout(() => toast.remove(), 300);
+  }, 3500);
 }
 
 function mostrarAlerta(mensaje, tipo = "warning", titulo = "") {
@@ -438,8 +438,8 @@ function setupAutocomplete(inputId, hiddenId, listId, getDataFn, displayField, v
     const items = list.getElementsByTagName("li");
     if (list.classList.contains("hidden") || items.length === 0) return;
 
-    if (e.key === "ArrowDown") { currentFocus++; addActive(items); } 
-    else if (e.key === "ArrowUp") { currentFocus--; addActive(items); } 
+    if (e.key === "ArrowDown") { currentFocus++; addActive(items); }
+    else if (e.key === "ArrowUp") { currentFocus--; addActive(items); }
     else if (e.key === "Enter" || e.key === "Tab") {
       e.preventDefault();
       if (currentFocus > -1) items[currentFocus]._selectTrigger();
@@ -463,7 +463,7 @@ function setupAutocomplete(inputId, hiddenId, listId, getDataFn, displayField, v
 
   function removeActive(items) {
     for (let i = 0; i < items.length; i++) {
-        items[i].classList.remove("bg-blue-100", "dark:bg-blue-600", "text-blue-900", "dark:text-white");
+      items[i].classList.remove("bg-blue-100", "dark:bg-blue-600", "text-blue-900", "dark:text-white");
     }
   }
 }
@@ -481,7 +481,7 @@ function agregarItemLista() {
 
   const materialObj = AppState.datos.materiales.find((m) => m.ID_MEMB === materialId);
   const m3Unitario = materialObj && materialObj.M3 ? parseFloat(String(materialObj.M3).replace(",", ".")) : 0;
-  
+
   AppState.cargoItems.push({
     destinoId, destinoName: destinoText, materialId, materialName: materialText,
     cantidad, m3Unitario, m3Total: m3Unitario * cantidad
@@ -495,14 +495,14 @@ function renderizarListaItems() {
   const container = document.getElementById("listaMaterialesAgregados");
   const emptyState = document.getElementById("emptyState");
   const displayTotalM3 = document.getElementById("lblTotalM3");
-  const boxResumen = document.getElementById("lblResumenTipos"); 
+  const boxResumen = document.getElementById("lblResumenTipos");
 
   Array.from(container.children).forEach((child) => {
     if (child.id !== "emptyState") child.remove();
   });
 
   let sumatoriaM3 = 0;
-  let conteoTipos = {}; 
+  let conteoTipos = {};
 
   if (AppState.cargoItems.length === 0) {
     emptyState.style.display = "block";
@@ -577,53 +577,53 @@ async function handleFormSubmit(e) {
   const idLocal = `LOC-${Date.now().toString().slice(-6)}`;
   const choferCat = AppState.datos.choferes.find(c => c.ID_CHFR === chofer);
   const ahora = new Date();
-  const fechaFormat = `${ahora.getDate().toString().padStart(2, '0')}/${(ahora.getMonth()+1).toString().padStart(2, '0')}/${ahora.getFullYear()} ${ahora.getHours().toString().padStart(2, '0')}:${ahora.getMinutes().toString().padStart(2, '0')}:${ahora.getSeconds().toString().padStart(2, '0')}`;
+  const fechaFormat = `${ahora.getDate().toString().padStart(2, '0')}/${(ahora.getMonth() + 1).toString().padStart(2, '0')}/${ahora.getFullYear()} ${ahora.getHours().toString().padStart(2, '0')}:${ahora.getMinutes().toString().padStart(2, '0')}:${ahora.getSeconds().toString().padStart(2, '0')}`;
 
   const materialesPayload = AppState.cargoItems.map((i) => ({
-      id_memb: i.materialId,
-      materialName: i.materialName,
-      cantidad: i.cantidad,
-      destino: i.destinoId
+    id_memb: i.materialId,
+    materialName: i.materialName,
+    cantidad: i.cantidad,
+    destino: i.destinoId
   }));
 
   const nuevoCargoOptimista = {
-      idCargo: idLocal,
-      isLocalSyncPending: true,
-      choferNombre: choferCat ? choferCat.NOMBRE : chofer,
-      placa: vehiculo,
-      hora: fechaFormat,
-      _horaSort: estandarizarFecha(fechaFormat),
-      gestor: AppState.user ? AppState.user.nombre : 'Operador Local',
-      firmaCargo: firmaComprimida,
-      detalles: AppState.cargoItems.map((i, idx) => ({
-          ID_DETALLE: `${idLocal}-D${idx + 1}`,
-          LLEVA: i.cantidad,
-          DEVUELVE: 0,
-          DEUDA: i.cantidad,
-          DESTINO: i.destinoId,
-          MATERIAL: i.materialId,
-          EMISOR: area
-      }))
+    idCargo: idLocal,
+    isLocalSyncPending: true,
+    choferNombre: choferCat ? choferCat.NOMBRE : chofer,
+    placa: vehiculo,
+    hora: fechaFormat,
+    _horaSort: estandarizarFecha(fechaFormat),
+    gestor: AppState.user ? AppState.user.nombre : 'Operador Local',
+    firmaCargo: firmaComprimida,
+    detalles: AppState.cargoItems.map((i, idx) => ({
+      ID_DETALLE: `${idLocal}-D${idx + 1}`,
+      LLEVA: i.cantidad,
+      DEVUELVE: 0,
+      DEUDA: i.cantidad,
+      DESTINO: i.destinoId,
+      MATERIAL: i.materialId,
+      EMISOR: area
+    }))
   };
 
   AppState.cargosActivos.unshift(nuevoCargoOptimista);
   await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
 
   await SyncEngine.enqueueMutation('saveCargo', {
-      data: {
-          localIdRef: idLocal,
-          chofer,
-          vehiculo,
-          area,
-          firma: firmaComprimida,
-          gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
-          gestorCorreo: AppState.user ? AppState.user.usuario : 'almacenpt@lagenovesa.com.pe',
-          materiales: materialesPayload
-      }
+    data: {
+      localIdRef: idLocal,
+      chofer,
+      vehiculo,
+      area,
+      firma: firmaComprimida,
+      gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
+      gestorCorreo: AppState.user ? AppState.user.usuario : 'almacenpt@lagenovesa.com.pe',
+      materiales: materialesPayload
+    }
   });
 
   if (document.getElementById("chkAutoPrint")?.checked) {
-      generarDocumentoImpresion(idLocal);
+    generarDocumentoImpresion(idLocal);
   }
 
   mostrarToast(`Cargo ${idLocal} registrado. Sincronizando en segundo plano...`);
@@ -653,7 +653,7 @@ document.getElementById("tabDescargo").addEventListener("click", () => {
   document.getElementById("tabDescargo").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 bg-emerald-600 rounded-xl text-xs md:text-sm font-bold text-white shadow-md transition-all";
   document.getElementById("tabEmitir").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
   document.getElementById("tabHistorico").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
-  
+
   renderizarCargosFiltrados();
   SyncEngine.pullLatestState();
 });
@@ -665,14 +665,14 @@ document.getElementById("tabHistorico").addEventListener("click", () => {
   document.getElementById("tabHistorico").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 bg-blue-600 rounded-xl text-xs md:text-sm font-bold text-white shadow-md transition-all";
   document.getElementById("tabEmitir").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
   document.getElementById("tabDescargo").className = "flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all";
-  
+
   renderizarHistorico();
   SyncEngine.pullLatestState();
 });
 
 document.getElementById("btnRefreshCargos").addEventListener("click", () => {
-    mostrarToast("Sincronizando viajes...");
-    SyncEngine.processQueue().then(() => SyncEngine.pullLatestState());
+  mostrarToast("Sincronizando viajes...");
+  SyncEngine.processQueue().then(() => SyncEngine.pullLatestState());
 });
 document.getElementById("inBuscarCargo").addEventListener("input", renderizarCargosFiltrados);
 document.getElementById("selFiltroColumna").addEventListener("change", renderizarCargosFiltrados);
@@ -723,12 +723,12 @@ function getBadgeSLA(fechaLatina) {
   return `<span class="ml-1.5 px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 dark:bg-gray-800 text-gray-500">${horas}h</span>`;
 }
 
-window.toggleFiltroCriticosSLA = function() {
+window.toggleFiltroCriticosSLA = function () {
   AppState.filtroSoloCriticosSLA = !AppState.filtroSoloCriticosSLA;
   renderizarCargosFiltrados();
 };
 
-window.filtrarPorChoferKPI = function(nombreChofer) {
+window.filtrarPorChoferKPI = function (nombreChofer) {
   const input = document.getElementById("inBuscarCargo");
   const select = document.getElementById("selFiltroColumna");
   if (input.value === nombreChofer) {
@@ -911,7 +911,7 @@ function renderizarTablaUI(cargos) {
     const horaSalida = cargo.hora || "--/--/---- --:--:--";
     const isLocal = String(cargo.idCargo).startsWith("LOC-");
     let badgeEstadoHTML = "";
-    
+
     if (totalDeuda > 0) {
       badgeEstadoHTML = `<span class="bg-pink-50 dark:bg-pink-600/20 text-pink-600 dark:text-pink-400 border border-pink-200 dark:border-pink-500/30 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 justify-center w-fit mx-auto shadow-sm">
         <span class="w-1.5 h-1.5 rounded-full bg-pink-500 animate-pulse"></span>Debe ${totalDeuda}
@@ -945,9 +945,26 @@ function renderizarTablaUI(cargos) {
 }
 
 // ==========================================
-// 10. MODAL DETALLE Y LIQUIDACIÓN OPTIMISTA (1-TAP)
+// 10. MODAL DETALLE Y LIQUIDACIÓN OPTIMISTA (PC & MOBILE PRO)
 // ==========================================
-window.autocompletarDevolucionTotal = function() {
+
+// SVG Corporativo Fallback si no hay foto o está offline
+const FALLBACK_TRUCK_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 450'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%231e293b'/%3E%3Cstop offset='100%25' stop-color='%230f172a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='450' fill='url(%23g)'/%3E%3Cg transform='translate(280,115)' fill='none' stroke='%2338bdf8' stroke-width='10' stroke-linecap='round' stroke-linejoin='round' opacity='0.35'%3E%3Crect x='10' y='30' width='140' height='100' rx='10'/%3E%3Cpath d='M150 65h45l30 35v30h-75z'/%3E%3Ccircle cx='55' cy='145' r='22'/%3E%3Ccircle cx='185' cy='145' r='22'/%3E%3C/g%3E%3C/svg%3E";
+
+function resolverUrlImagenVehiculo(rawUrl) {
+  if (!rawUrl) return FALLBACK_TRUCK_SVG;
+  const url = String(rawUrl).trim();
+  if (!url) return FALLBACK_TRUCK_SVG;
+
+  // Extraer ID de enlaces de Google Drive (/d/ID/ o ?id=ID) para evitar bloqueo ORB/CORS
+  const matchId = url.match(/(?:\/d\/|[?&]id=)([a-zA-Z0-9_-]{25,})/);
+  if (matchId && matchId[1]) {
+    return `https://lh3.googleusercontent.com/d/${matchId[1]}=w800`;
+  }
+  return url;
+}
+
+window.autocompletarDevolucionTotal = function () {
   const inputs = document.querySelectorAll(".mdl-return-input:not([disabled])");
   if (inputs.length === 0) return;
 
@@ -983,70 +1000,106 @@ function abrirDetalle(idCargo) {
   document.getElementById("mdlTitleCargo").textContent = cargo.idCargo;
   document.getElementById("mdlChofer").textContent = cargo.choferNombre;
   document.getElementById("mdlHora").textContent = cargo.hora || "--";
-  
+
   const areaRaw = cargo.detalles[0]?.EMISOR || cargo.area || "Almacén PT";
   const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
   document.getElementById("mdlDespacho").textContent = areaCat ? areaCat.REFERENCIA : areaRaw;
   document.getElementById("mdlGestor").textContent = cargo.gestor || "No registrado";
 
+  // Carga blindada de imagen del vehículo con fallback automático
   const vehiculoObj = AppState.datos.vehiculos.find(v => v.PLACA === cargo.placa);
-  let fotoUrl = "https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&q=80&w=800";
-  if (vehiculoObj && vehiculoObj.FOTO_VEHICULO) fotoUrl = String(vehiculoObj.FOTO_VEHICULO).trim();
+  const imgEl = document.getElementById("imgVehiculoModal");
+  imgEl.onerror = () => { imgEl.onerror = null; imgEl.src = FALLBACK_TRUCK_SVG; };
+  imgEl.src = resolverUrlImagenVehiculo(vehiculoObj?.FOTO_VEHICULO);
 
-  document.getElementById("imgVehiculoModal").src = fotoUrl;
   document.getElementById("mdlPlaca").textContent = vehiculoObj ? vehiculoObj.DISPLAY_NAME : cargo.placa || "S/N";
 
   const mdlBadge = document.getElementById("mdlBadgeDeuda");
   if (totalDeudaViaje > 0) {
-    mdlBadge.innerHTML = `<span class="bg-pink-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm flex items-center gap-2 w-fit shadow-lg"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Debe ${totalDeudaViaje} materiales</span>`;
+    mdlBadge.innerHTML = `<span class="bg-pink-600 text-white font-bold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5 w-fit shadow-lg"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Debe ${totalDeudaViaje} materiales</span>`;
   } else if (totalDeudaViaje < 0) {
-    mdlBadge.innerHTML = `<span class="bg-amber-500 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg">Excedente: ${Math.abs(totalDeudaViaje)}</span>`;
+    mdlBadge.innerHTML = `<span class="bg-amber-500 text-white font-bold px-3 py-1.5 rounded-lg text-xs w-fit shadow-lg">Excedente: ${Math.abs(totalDeudaViaje)}</span>`;
   } else {
-    mdlBadge.innerHTML = `<span class="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded-lg text-sm w-fit shadow-lg">Completado / Sin deuda</span>`;
+    mdlBadge.innerHTML = `<span class="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded-lg text-xs w-fit shadow-lg">Completado / Sin deuda</span>`;
   }
 
   document.getElementById("mdlDestinosCount").textContent = `(${destinosSet.size})`;
   document.getElementById("mdlDestinosList").innerHTML = Array.from(destinosSet).map((dest) => `<div class="truncate" title="${dest}">${dest}</div>`).join("");
   document.getElementById("mdlTiposCount").textContent = `(${Object.keys(resumenTipos).length})`;
-  document.getElementById("mdlTiposList").innerHTML = Object.keys(resumenTipos).map((tipo) => `<div class="truncate" title="${tipo}"><span class="text-emerald-600 dark:text-emerald-400 font-bold mr-1">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
+  document.getElementById("mdlTiposList").innerHTML = Object.keys(resumenTipos).map((tipo) => `<div class="flex justify-between gap-2"><span class="truncate" title="${tipo}">${tipo}</span><span class="text-emerald-600 dark:text-emerald-400 font-bold shrink-0">${resumenTipos[tipo]}</span></div>`).join("");
 
   document.getElementById("mdlTotalMateriales").outerHTML = `
     <span id="mdlTotalMateriales" class="flex items-center gap-2">
-      <span class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white px-2 py-0.5 rounded text-sm">${totalMaterialesLlevados}</span>
-      <span class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 text-emerald-600 dark:text-emerald-400 font-mono px-2 py-0.5 rounded text-xs shadow-sm">
-        Vol: ${totalM3Llevado.toFixed(3)} m³
+      <span class="bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white px-2.5 py-0.5 rounded-lg text-sm font-black">${totalMaterialesLlevados} und.</span>
+      <span class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 text-emerald-600 dark:text-emerald-400 font-mono px-2.5 py-0.5 rounded-lg text-xs font-bold shadow-sm">
+        ${totalM3Llevado.toFixed(3)} m³
       </span>
     </span>
   `;
 
+  // 1. Renderizado Tabla Escritorio (Desktop)
   const tablaHTML = detallesProcesados.map((det) => `
-    <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors border-b border-gray-200 dark:border-gray-800 last:border-0 ${det.deuda <= 0 ? "opacity-60 bg-gray-50 dark:bg-gray-900/30" : ""}">
-      <td class="px-3 py-3 text-gray-600 dark:text-gray-400 align-middle">${det.nombreDestino}</td>
-      <td class="px-3 py-3 align-middle">
-        <div class="${det.deuda <= 0 ? "text-gray-500" : "text-gray-800 dark:text-gray-200"} font-medium leading-snug">${det.nombreMaterial}</div>
-        <div class="text-[10px] text-emerald-600 dark:text-emerald-400/80 font-mono mt-1">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
+    <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${det.deuda <= 0 ? "opacity-60 bg-gray-50 dark:bg-gray-900/30" : ""}">
+      <td class="px-4 py-3.5 text-gray-600 dark:text-gray-400 font-medium">${det.nombreDestino}</td>
+      <td class="px-4 py-3.5">
+        <div class="${det.deuda <= 0 ? "text-gray-500" : "text-gray-900 dark:text-gray-100"} font-bold">${det.nombreMaterial}</div>
+        <div class="text-[11px] text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">Vol: ${det.m3Llevado.toFixed(3)} m³</div>
       </td>
-      <td class="px-3 py-3 align-middle">
-         <div class="flex items-center justify-center gap-2 md:gap-3 text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg p-1.5 border border-gray-200 dark:border-gray-700 w-max mx-auto">
-            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Lleva</span><span class="text-gray-800 dark:text-white font-bold">${det.lleva}</span></div>
+      <td class="px-4 py-3.5">
+         <div class="flex items-center justify-center gap-3 text-xs bg-gray-50 dark:bg-gray-800/80 rounded-xl p-2 border border-gray-200 dark:border-gray-700 w-max mx-auto">
+            <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Lleva</span><span class="text-gray-900 dark:text-white font-black text-sm">${det.lleva}</span></div>
             <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
-            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Devuelto</span><span class="text-emerald-600 dark:text-emerald-400 font-bold">${det.devuelve}</span></div>
+            <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Devuelto</span><span class="text-emerald-600 dark:text-emerald-400 font-black text-sm">${det.devuelve}</span></div>
             <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
-            <div class="flex flex-col items-center"><span class="text-[9px] text-gray-500 uppercase">Deuda</span><span class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-500"} font-bold">${det.deuda}</span></div>
+            <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Deuda</span><span class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-500"} font-black text-sm">${det.deuda}</span></div>
          </div>
       </td>
-      <td class="px-3 py-3 align-middle w-24">
+      <td class="px-4 py-3.5 w-32">
         <input type="number" min="0" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
-               class="w-full bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded p-1.5 text-center text-emerald-600 dark:text-emerald-400 font-bold focus:border-emerald-500 outline-none mdl-return-input transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+               class="w-full bg-white dark:bg-gray-950 border-2 border-gray-300 dark:border-gray-700 rounded-xl p-2 text-center text-base text-emerald-600 dark:text-emerald-400 font-black focus:border-emerald-500 outline-none mdl-return-input mdl-input-desktop transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50"
                ${det.deuda <= 0 ? "disabled" : ""}>
       </td>
     </tr>
   `).join("");
-  
-  const tb = document.getElementById("mdlTablaMateriales");
-  tb.innerHTML = tablaHTML;
+  document.getElementById("mdlTablaMateriales").innerHTML = tablaHTML;
 
-  // Blindaje de integridad referencial para cargos locales (LOC-XXXXXX) aún no confirmados por GAS
+  // 2. Renderizado Tarjetas Táctiles (Móvil)
+  const cardsMobileHTML = detallesProcesados.map((det) => `
+    <div class="pt-3 first:pt-0 ${det.deuda <= 0 ? "opacity-60" : ""}">
+      <div class="flex justify-between items-start gap-2 mb-2">
+        <div>
+          <span class="text-[10px] font-bold uppercase text-blue-600 dark:text-blue-400">${det.nombreDestino}</span>
+          <h5 class="text-sm font-bold text-gray-900 dark:text-white leading-snug">${det.nombreMaterial}</h5>
+        </div>
+        <span class="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 shrink-0">${det.m3Llevado.toFixed(3)} m³</span>
+      </div>
+      <div class="flex items-center justify-between gap-3 bg-gray-50 dark:bg-gray-800/70 p-2.5 rounded-xl border border-gray-200 dark:border-gray-700">
+        <div class="flex items-center gap-3 text-xs">
+          <div><span class="text-[9px] text-gray-500 block uppercase">Lleva</span><strong class="text-gray-900 dark:text-white text-sm">${det.lleva}</strong></div>
+          <div><span class="text-[9px] text-gray-500 block uppercase">Dev.</span><strong class="text-emerald-600 dark:text-emerald-400 text-sm">${det.devuelve}</strong></div>
+          <div><span class="text-[9px] text-gray-500 block uppercase">Deuda</span><strong class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : "text-gray-500"} text-sm">${det.deuda}</strong></div>
+        </div>
+        <div class="w-24 shrink-0">
+          <input type="number" min="0" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "Retorna"}"
+                 class="w-full bg-white dark:bg-gray-950 border-2 border-gray-300 dark:border-gray-600 rounded-xl p-2 text-center text-base text-emerald-600 dark:text-emerald-400 font-black focus:border-emerald-500 outline-none mdl-return-input mdl-input-mobile disabled:opacity-50"
+                 ${det.deuda <= 0 ? "disabled" : ""}>
+        </div>
+      </div>
+    </div>
+  `).join("");
+  document.getElementById("mdlCardsMaterialesMobile").innerHTML = cardsMobileHTML;
+
+  // Sincronización bidireccional entre inputs desktop y mobile por data-id
+  document.querySelectorAll(".mdl-return-input").forEach(inp => {
+    inp.addEventListener("input", (e) => {
+      const id = e.target.getAttribute("data-id");
+      document.querySelectorAll(`.mdl-return-input[data-id="${id}"]`).forEach(sibling => {
+        if (sibling !== e.target) sibling.value = e.target.value;
+      });
+    });
+  });
+
+  // Blindaje de integridad referencial para cargos locales (LOC-XXXXXX)
   const esCargoLocalSinSincronizar = String(cargo.idCargo).startsWith("LOC-");
   const btnLiq = document.getElementById("btnLiquidarModal");
   const btnTodo = document.getElementById("btnDevolverTodoModal");
@@ -1069,12 +1122,12 @@ function abrirDetalle(idCargo) {
   btnLiq.setAttribute("onclick", `procesarLiquidacionModal('${cargo.idCargo}')`);
   document.getElementById("btnPrintModal").onclick = () => generarDocumentoImpresion(cargo.idCargo);
 
-  const inputsRetorna = document.querySelectorAll(".mdl-return-input:not([disabled])");
-  inputsRetorna.forEach((input, index) => {
+  const inputsDesktop = document.querySelectorAll(".mdl-input-desktop:not([disabled])");
+  inputsDesktop.forEach((input, index) => {
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        if (index < inputsRetorna.length - 1) inputsRetorna[index + 1].focus();
+        if (index < inputsDesktop.length - 1) inputsDesktop[index + 1].focus();
         else btnLiq.focus();
       }
     });
@@ -1087,17 +1140,20 @@ function abrirDetalle(idCargo) {
   setTimeout(() => {
     modal.classList.remove("opacity-0");
     modalContent.classList.remove("scale-95");
-    if (inputsRetorna.length > 0 && !esCargoLocalSinSincronizar) inputsRetorna[0].focus();
+    if (window.innerWidth >= 768 && inputsDesktop.length > 0 && !esCargoLocalSinSincronizar) {
+      inputsDesktop[0].focus();
+    }
   }, 50);
 }
 
-// LIQUIDACIÓN OPTIMISTA EN 0ms
+// LIQUIDACIÓN OPTIMISTA EN 0ms (Deduplicada por ID_DETALLE)
 async function procesarLiquidacionModal(idCargo) {
   if (String(idCargo).startsWith("LOC-")) {
-      return mostrarAlerta("Este cargo aún está pendiente de sincronización inicial. Espera a que obtenga su código oficial GCM.", "warning", "Sincronización en Curso");
+    return mostrarAlerta("Este cargo aún está pendiente de sincronización inicial. Espera a que obtenga su código oficial GCM.", "warning", "Sincronización en Curso");
   }
 
-  const inputs = document.querySelectorAll(".mdl-return-input:not([disabled])");
+  // Leer solo desde la vista desktop (que está sincronizada 1:1 con móvil) para evitar duplicados
+  const inputs = document.querySelectorAll(".mdl-input-desktop:not([disabled])");
   const payloadDevolucion = [];
   inputs.forEach((input) => {
     const qty = parseInt(input.value, 10);
@@ -1105,33 +1161,33 @@ async function procesarLiquidacionModal(idCargo) {
   });
 
   if (payloadDevolucion.length === 0) {
-      return mostrarAlerta("Ingresa al menos una cantidad mayor a 0 en la columna 'Retorna'.", "warning", "Datos Insuficientes");
+    return mostrarAlerta("Ingresa al menos una cantidad mayor a 0 en la columna 'Retorna'.", "warning", "Datos Insuficientes");
   }
 
   const cargoIndex = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
   if (cargoIndex !== -1) {
-      const cargo = AppState.cargosActivos[cargoIndex];
-      let deudaRestanteCargo = 0;
+    const cargo = AppState.cargosActivos[cargoIndex];
+    let deudaRestanteCargo = 0;
 
-      cargo.detalles.forEach(det => {
-          const mov = payloadDevolucion.find(p => p.id_detalle === det.ID_DETALLE);
-          if (mov) {
-              det.DEVUELVE = parseInt(det.DEVUELVE || 0, 10) + mov.qty;
-              det.DEUDA = parseInt(det.LLEVA || 0, 10) - det.DEVUELVE;
-          }
-          deudaRestanteCargo += parseInt(det.DEUDA || 0, 10);
-      });
-
-      if (deudaRestanteCargo <= 0) {
-          AppState.cargosActivos.splice(cargoIndex, 1);
+    cargo.detalles.forEach(det => {
+      const mov = payloadDevolucion.find(p => p.id_detalle === det.ID_DETALLE);
+      if (mov) {
+        det.DEVUELVE = parseInt(det.DEVUELVE || 0, 10) + mov.qty;
+        det.DEUDA = parseInt(det.LLEVA || 0, 10) - det.DEVUELVE;
       }
+      deudaRestanteCargo += parseInt(det.DEUDA || 0, 10);
+    });
 
-      await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
+    if (deudaRestanteCargo <= 0) {
+      AppState.cargosActivos.splice(cargoIndex, 1);
+    }
+
+    await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
   }
 
   await SyncEngine.enqueueMutation('updateDevolucion', {
-      data: payloadDevolucion,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido'
+    data: payloadDevolucion,
+    gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido'
   });
 
   cerrarDetalle();
@@ -1139,20 +1195,12 @@ async function procesarLiquidacionModal(idCargo) {
   mostrarToast(`Liquidación del cargo ${idCargo} guardada. Sincronizando...`);
 }
 
-function cerrarDetalle() {
-  const modal = document.getElementById("modalDetalle");
-  const modalContent = document.getElementById("modalDetalleContent");
-  modal.classList.add("opacity-0");
-  modalContent.classList.add("scale-95");
-  setTimeout(() => modal.classList.add("hidden"), 300); 
-}
-
 // ==========================================
 // 11. MÓDULO HISTÓRICO, KPIs Y EXPORTADOR CSV
 // ==========================================
 document.getElementById("btnRefreshHistorico").addEventListener("click", () => {
-    mostrarToast("Actualizando histórico...");
-    SyncEngine.processQueue().then(() => SyncEngine.pullLatestState());
+  mostrarToast("Actualizando histórico...");
+  SyncEngine.processQueue().then(() => SyncEngine.pullLatestState());
 });
 document.getElementById("inBuscarHistorico").addEventListener("input", renderizarHistorico);
 document.getElementById("inDesdeHistorico").addEventListener("change", renderizarHistorico);
@@ -1213,7 +1261,7 @@ function renderizarKPIsHistorico(registrosFiltrados) {
 
 let ultimoHistoricoExportable = [];
 
-window.exportarHistoricoCSV = function() {
+window.exportarHistoricoCSV = function () {
   if (!ultimoHistoricoExportable || ultimoHistoricoExportable.length === 0) {
     return mostrarAlerta("No hay registros filtrados para exportar.", "warning", "Tabla Vacía");
   }
@@ -1251,8 +1299,8 @@ window.exportarHistoricoCSV = function() {
 function renderizarHistorico() {
   const grid = document.getElementById("gridHistorico");
   const searchTerm = document.getElementById("inBuscarHistorico").value.toLowerCase().trim();
-  const fechaDesde = document.getElementById("inDesdeHistorico").value; 
-  const fechaHasta = document.getElementById("inHastaHistorico").value; 
+  const fechaDesde = document.getElementById("inDesdeHistorico").value;
+  const fechaHasta = document.getElementById("inHastaHistorico").value;
 
   let filtrados = AppState.historial.map(det => {
     const materialObj = AppState.datos.materiales.find(m => m.ID_MEMB === det.material);
@@ -1276,7 +1324,7 @@ function renderizarHistorico() {
     filtrados = filtrados.filter(item => {
       if (!item.horaCargo) return false;
       const datePart = item.horaCargo.split(' ')[0], parts = datePart.split('/');
-      if(parts.length !== 3) return true; 
+      if (parts.length !== 3) return true;
       const itemDateISO = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
       let pasaDesde = true, pasaHasta = true;
       if (fechaDesde) pasaDesde = itemDateISO >= fechaDesde;
@@ -1288,8 +1336,8 @@ function renderizarHistorico() {
   if (searchTerm) {
     filtrados = filtrados.filter(item => {
       return (item.idCargo || "").toLowerCase().includes(searchTerm) || (item.materialName || "").toLowerCase().includes(searchTerm) ||
-             (item.destinoName || "").toLowerCase().includes(searchTerm) || (item.choferName || "").toLowerCase().includes(searchTerm) ||
-             (item.horaCargo || "").toLowerCase().includes(searchTerm);
+        (item.destinoName || "").toLowerCase().includes(searchTerm) || (item.choferName || "").toLowerCase().includes(searchTerm) ||
+        (item.horaCargo || "").toLowerCase().includes(searchTerm);
     });
   }
 
@@ -1339,7 +1387,7 @@ function renderizarHistorico() {
   filtrados.forEach(row => {
     let badgeEstadoHTML = "";
     const deuda = parseInt(row.deuda, 10);
-    
+
     if (deuda > 0) {
       badgeEstadoHTML = `<span class="bg-pink-50 dark:bg-pink-600/20 text-pink-600 dark:text-pink-400 border border-pink-200 dark:border-pink-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Pendiente</span>`;
     } else if (deuda < 0) {
@@ -1375,33 +1423,33 @@ function renderizarHistorico() {
 // ==========================================
 // 12. MINIMODAL TRAZABILIDAD
 // ==========================================
-window.abrirTrazabilidad = function(e, idDetalle) {
-    const row = AppState.historialFiltrado.find(r => r.idDetalle === idDetalle);
-    if (!row) return;
+window.abrirTrazabilidad = function (e, idDetalle) {
+  const row = AppState.historialFiltrado.find(r => r.idDetalle === idDetalle);
+  if (!row) return;
 
-    let globo = document.getElementById('globo-trazabilidad');
-    if (!globo) {
-        globo = document.createElement('div');
-        globo.id = 'globo-trazabilidad';
-        globo.className = 'absolute z-[100] hidden bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-600 p-4 w-80 text-left transform transition-opacity opacity-0';
-        globo.innerHTML = `
+  let globo = document.getElementById('globo-trazabilidad');
+  if (!globo) {
+    globo = document.createElement('div');
+    globo.id = 'globo-trazabilidad';
+    globo.className = 'absolute z-[100] hidden bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-600 p-4 w-80 text-left transform transition-opacity opacity-0';
+    globo.innerHTML = `
             <div id="trazabilidad-contenido" class="space-y-3"></div>
             <div id="trazabilidad-flecha" class="absolute w-4 h-4 bg-white dark:bg-gray-900 border-b border-r border-gray-200 dark:border-gray-600 rotate-45 transition-all"></div>
         `;
-        document.body.appendChild(globo);
+    document.body.appendChild(globo);
 
-        document.addEventListener('click', (ev) => {
-            if (!ev.target.closest('.celda-trazabilidad') && !globo.contains(ev.target)) {
-                globo.classList.add('hidden');
-                globo.classList.remove('opacity-100');
-            }
-        });
-    }
+    document.addEventListener('click', (ev) => {
+      if (!ev.target.closest('.celda-trazabilidad') && !globo.contains(ev.target)) {
+        globo.classList.add('hidden');
+        globo.classList.remove('opacity-100');
+      }
+    });
+  }
 
-    const contenido = document.getElementById('trazabilidad-contenido');
-    const flecha = document.getElementById('trazabilidad-flecha');
+  const contenido = document.getElementById('trazabilidad-contenido');
+  const flecha = document.getElementById('trazabilidad-flecha');
 
-    contenido.innerHTML = `
+  contenido.innerHTML = `
         <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/30 p-3 rounded-lg shadow-sm">
           <p class="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
@@ -1426,29 +1474,29 @@ window.abrirTrazabilidad = function(e, idDetalle) {
         </div>
     `;
 
-    globo.classList.remove('hidden');
-    globo.classList.remove('opacity-100');
+  globo.classList.remove('hidden');
+  globo.classList.remove('opacity-100');
 
-    const rect = e.currentTarget.getBoundingClientRect(); 
-    const globoRect = globo.getBoundingClientRect();
-    
-    let top = rect.top + window.scrollY - globoRect.height - 10;
-    let left = rect.left + window.scrollX + (rect.width / 2) - (globoRect.width / 2);
+  const rect = e.currentTarget.getBoundingClientRect();
+  const globoRect = globo.getBoundingClientRect();
 
-    flecha.className = "absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-white dark:bg-gray-900 border-b border-r border-gray-200 dark:border-gray-600 rotate-45 transition-all";
+  let top = rect.top + window.scrollY - globoRect.height - 10;
+  let left = rect.left + window.scrollX + (rect.width / 2) - (globoRect.width / 2);
 
-    if (top < window.scrollY + 10) {
-        top = rect.bottom + window.scrollY + 10;
-        flecha.className = "absolute -top-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-white dark:bg-gray-900 border-t border-l border-gray-200 dark:border-gray-600 rotate-45 transition-all";
-    }
+  flecha.className = "absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-white dark:bg-gray-900 border-b border-r border-gray-200 dark:border-gray-600 rotate-45 transition-all";
 
-    if (left < 10) left = 10;
-    if (left + globoRect.width > window.innerWidth - 10) left = window.innerWidth - globoRect.width - 10;
+  if (top < window.scrollY + 10) {
+    top = rect.bottom + window.scrollY + 10;
+    flecha.className = "absolute -top-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-white dark:bg-gray-900 border-t border-l border-gray-200 dark:border-gray-600 rotate-45 transition-all";
+  }
 
-    globo.style.top = top + 'px';
-    globo.style.left = left + 'px';
-    
-    setTimeout(() => globo.classList.add('opacity-100'), 10);
+  if (left < 10) left = 10;
+  if (left + globoRect.width > window.innerWidth - 10) left = window.innerWidth - globoRect.width - 10;
+
+  globo.style.top = top + 'px';
+  globo.style.left = left + 'px';
+
+  setTimeout(() => globo.classList.add('opacity-100'), 10);
 };
 
 // ==========================================
@@ -1464,20 +1512,20 @@ function generarDocumentoImpresion(idCargo) {
   const resumenTipos = {};
 
   const filasTablaHTML = cargo.detalles.map((d) => {
-      const lleva = parseInt(d.LLEVA || 0, 10);
-      totalLlevado += lleva;
-      const destinoCat = AppState.datos.destinos.find((x) => x.ID_DSTN === d.DESTINO);
-      const nombreDestino = destinoCat ? destinoCat.REFERENCIA : d.DESTINO || "Desconocido";
-      const materialCat = AppState.datos.materiales.find((m) => m.ID_MEMB === d.MATERIAL);
-      const nombreMaterial = materialCat ? materialCat.DESCRIPCION : d.MATERIAL || "Desconocido";
-      
-      const m3Unitario = materialCat && materialCat.M3 ? parseFloat(String(materialCat.M3).replace(",", ".")) : 0;
-      totalM3Llevado += (m3Unitario * lleva);
+    const lleva = parseInt(d.LLEVA || 0, 10);
+    totalLlevado += lleva;
+    const destinoCat = AppState.datos.destinos.find((x) => x.ID_DSTN === d.DESTINO);
+    const nombreDestino = destinoCat ? destinoCat.REFERENCIA : d.DESTINO || "Desconocido";
+    const materialCat = AppState.datos.materiales.find((m) => m.ID_MEMB === d.MATERIAL);
+    const nombreMaterial = materialCat ? materialCat.DESCRIPCION : d.MATERIAL || "Desconocido";
 
-      destinosSet.add(nombreDestino);
-      resumenTipos[nombreMaterial] = (resumenTipos[nombreMaterial] || 0) + lleva;
+    const m3Unitario = materialCat && materialCat.M3 ? parseFloat(String(materialCat.M3).replace(",", ".")) : 0;
+    totalM3Llevado += (m3Unitario * lleva);
 
-      return `
+    destinosSet.add(nombreDestino);
+    resumenTipos[nombreMaterial] = (resumenTipos[nombreMaterial] || 0) + lleva;
+
+    return `
       <tr>
         <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; color: #4b5563;">${nombreDestino}</td>
         <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #1f2937;">${nombreMaterial}</td>
@@ -1485,7 +1533,7 @@ function generarDocumentoImpresion(idCargo) {
         <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: center;"></td>
       </tr>
     `;
-    }).join("");
+  }).join("");
 
   const destinosHTML = Array.from(destinosSet).map((dest) => `<div>• ${dest}</div>`).join("");
   const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span style="font-weight:700; margin-right:4px;">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
@@ -1589,7 +1637,7 @@ function generarDocumentoImpresion(idCargo) {
 </html>`;
 
   const printWindow = window.open("", "_blank");
-  if(printWindow) {
+  if (printWindow) {
     printWindow.document.open();
     printWindow.document.write(htmlPlantilla);
     printWindow.document.close();
