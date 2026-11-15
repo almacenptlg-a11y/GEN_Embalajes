@@ -941,7 +941,7 @@ async function handleFormSubmit(e) {
       area,
       firma: firmaComprimida,
       gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
-      gestorRol: AuthRules.currentUserRole()
+      gestorRol: AuthRules.currentUserRole(),
       gestorCorreo: AppState.user ? AppState.user.usuario : 'almacenpt@lagenovesa.com.pe',
       materiales: materialesPayload
     }
