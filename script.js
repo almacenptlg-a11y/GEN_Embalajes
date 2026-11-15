@@ -613,7 +613,7 @@ async function handleFormSubmit(e) {
           DEUDA: i.cantidad,
           DESTINO: i.destinoId,
           MATERIAL: i.materialId,
-          AREA: area
+          EMISOR: area
       }))
   };
 
@@ -838,7 +838,7 @@ function abrirDetalle(idCargo) {
   document.getElementById("mdlChofer").textContent = cargo.choferNombre;
   document.getElementById("mdlHora").textContent = cargo.hora || "--";
   
-  const areaRaw = cargo.detalles[0]?.AREA || cargo.area || "Almacén PT";
+  const areaRaw = cargo.detalles[0]?.EMISOR || cargo.area || "Almacén PT";
   const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
   document.getElementById("mdlDespacho").textContent = areaCat ? areaCat.REFERENCIA : areaRaw;
   document.getElementById("mdlGestor").textContent = cargo.gestor || "No registrado";
