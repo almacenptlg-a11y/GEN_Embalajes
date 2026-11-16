@@ -241,7 +241,7 @@ let syncStartedAt = 0; // Watchdog anti-deadlock
         try {
             const bust = `_t=${Date.now()}`;
             const tokenParam = encodeURIComponent(config.token);
-
+            const noCacheParam = force ? '&nocache=1' : '';
             const [resCargos, resHistory] = await Promise.all([
                 fetch(`${config.apiUrl}?action=getActiveCargos&token=${tokenParam}&${bust}`, {
                     method: 'GET',
