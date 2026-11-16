@@ -186,6 +186,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (btnSubmit) btnSubmit.disabled = true;
     }
   }, 4000);
+
+// Conectar TODOS los botones de sincronización al motor manual
+  document.getElementById('sync-badge')?.addEventListener('click', window.forzarSincronizacionManual);
+  document.getElementById('btnSyncMobile')?.addEventListener('click', window.forzarSincronizacionManual);
+  document.getElementById('btnRefreshCargos')?.addEventListener('click', window.forzarSincronizacionManual);
+  document.getElementById('btnRefreshHistorico')?.addEventListener('click', window.forzarSincronizacionManual);
+  
 });
 
 function actualizarUIUsuario() {
@@ -259,6 +266,41 @@ function handleRemoteSyncUpdate({ cargosActivos, historial }) {
     }
   }
 }
+
+/**
+ * Ejecuta una sincronización manual forzada:
+ * 1. Sube cualquier mutación local pendiente en IndexedDB.
+ * 2. Descarga el estado más reciente desde Google Sheets (sin caché).
+ * 3. Refresca la vista activa inmediatamente.
+ */
+window.forzarSincronizacionManual = async function () {
+  if (!navigator.onLine) {
+    mostrarToast("Sin conexión a internet. Operando en modo offline.", "error");
+    return;
+  }
+
+  const iconDesktop = document.getElementById('sync-icon');
+  const textDesktop = document.getElementById('sync-text');
+  if (iconDesktop) iconDesktop.classList.add('animate-spin-sync');
+  if (textDesktop) textDesktop.textContent = 'Buscando cambios...';
+
+  try {
+    await SyncEngine.processQueue();
+    await SyncEngine.pullLatestState();
+
+    // Forzar re-renderizado de ambas vistas con los datos recién descargados
+    renderizarCargosFiltrados();
+    renderizarHistorico();
+
+    mostrarToast("Datos sincronizados con el servidor.");
+  } catch (err) {
+    mostrarToast(`No se pudo sincronizar: ${err.message}`, "error");
+  } finally {
+    if (iconDesktop) iconDesktop.classList.remove('animate-spin-sync');
+    // Restaura el texto del badge según el estado real de la cola
+    SyncEngine.getQueue().then(q => actualizarBadgeSync(q.length, navigator.onLine));
+  }
+};
 
 // ==========================================
 // 4. INICIALIZACIÓN (STALE-WHILE-REVALIDATE)
@@ -995,10 +1037,6 @@ document.getElementById("tabHistorico").addEventListener("click", () => {
   SyncEngine.pullLatestState();
 });
 
-document.getElementById("btnRefreshCargos").addEventListener("click", () => {
-  mostrarToast("Sincronizando viajes...");
-  SyncEngine.processQueue().then(() => SyncEngine.pullLatestState());
-});
 document.getElementById("inBuscarCargo").addEventListener("input", renderizarCargosFiltrados);
 document.getElementById("selFiltroColumna").addEventListener("change", renderizarCargosFiltrados);
 
@@ -2229,10 +2267,7 @@ window.eliminarCargoCompleto = async function (idCargo) {
 // ==========================================
 // 11. MÓDULO HISTÓRICO, KPIs Y EXPORTADOR CSV
 // ==========================================
-document.getElementById("btnRefreshHistorico").addEventListener("click", () => {
-  mostrarToast("Actualizando histórico...");
-  SyncEngine.processQueue().then(() => SyncEngine.pullLatestState());
-});
+
 document.getElementById("inBuscarHistorico").addEventListener("input", renderizarHistorico);
 
 window.setHistorySort = function (key) {
