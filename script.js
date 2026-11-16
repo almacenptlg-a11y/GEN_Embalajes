@@ -282,23 +282,25 @@ window.forzarSincronizacionManual = async function () {
   const iconDesktop = document.getElementById('sync-icon');
   const textDesktop = document.getElementById('sync-text');
   if (iconDesktop) iconDesktop.classList.add('animate-spin-sync');
-  if (textDesktop) textDesktop.textContent = 'Buscando cambios...';
+  if (textDesktop) textDesktop.textContent = 'Sincronizando...';
 
   try {
+    // 1. Subir mutaciones pendientes si existieran
     await SyncEngine.processQueue();
-    await SyncEngine.pullLatestState();
+    // 2. Descargar estado remoto fresco (bypass de caché HTTP)
+    await SyncEngine.pullLatestState(true);
 
-    // Forzar re-renderizado de ambas vistas con los datos recién descargados
+    // 3. Re-renderizar vistas activas
     renderizarCargosFiltrados();
     renderizarHistorico();
 
-    mostrarToast("Datos sincronizados con el servidor.");
+    mostrarToast("Datos actualizados desde el servidor.");
   } catch (err) {
-    mostrarToast(`No se pudo sincronizar: ${err.message}`, "error");
+    mostrarToast(`Error al sincronizar: ${err.message}`, "error");
   } finally {
     if (iconDesktop) iconDesktop.classList.remove('animate-spin-sync');
-    // Restaura el texto del badge según el estado real de la cola
-    SyncEngine.getQueue().then(q => actualizarBadgeSync(q.length, navigator.onLine));
+    const q = await SyncEngine.getQueueItems();
+    actualizarBadgeSync(q.length, navigator.onLine);
   }
 };
 
