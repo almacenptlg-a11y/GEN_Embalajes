@@ -1,6 +1,6 @@
 /**
- * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics v1.2.0)
- * @architecture Zero-Trust | Offline-First | Optimistic UI O(1) | Real-Time KPIs & SLA
+ * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics v1.3.0)
+ * @architecture Zero-Trust | Offline-First | Optimistic UI O(1) | Dual Print (A4 / 80mm)
  */
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-QJ6RZdmQw3gJIt80Y6f4iTKyS7BqhXrgHTGWrO0PiSj4m/exec";
@@ -33,20 +33,21 @@ const AppState = {
 };
 
 let cargoActualModalId = null;
+let isManualSyncRunning = false;
 
 // ==========================================
 // 1. SEGURIDAD: IFRAME ENFORCER (Anti-Bypass)
 // ==========================================
 if (window === window.top) {
   document.documentElement.innerHTML = `
-        <body style="background-color: #111827; color: #ef4444; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: sans-serif; text-align: center;">
-            <div>
-                <svg style="width: 80px; height: 80px; margin: 0 auto 20px auto;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                <h1 style="font-size: 2rem; font-weight: bold; margin-bottom: 10px;">ACCESO DENEGADO</h1>
-                <p style="color: #9ca3af;">Este módulo es privado y solo puede ejecutarse dentro del HUB corporativo.</p>
-            </div>
-        </body>
-    `;
+    <body style="background-color: #111827; color: #ef4444; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: sans-serif; text-align: center;">
+      <div>
+        <svg style="width: 80px; height: 80px; margin: 0 auto 20px auto;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+        <h1 style="font-size: 2rem; font-weight: bold; margin-bottom: 10px;">ACCESO DENEGADO</h1>
+        <p style="color: #9ca3af;">Este módulo es privado y solo puede ejecutarse dentro del HUB corporativo.</p>
+      </div>
+    </body>
+  `;
   throw new Error("Ejecución bloqueada por política de seguridad (No-Iframe).");
 }
 
@@ -83,9 +84,9 @@ const AuthRules = {
 
     const rol = this.norm(this.extractRawRole());
     if (!rol) return false;
-//TIPOS DE ROLES ADMITIDOS PARA EDICION TOTAL DE LOS DATOS
-    const adminKeywords = ['ADMIN', 'ADMINISTRADOR'];
-    return adminKeywords.some(k => rol === k || rol.includes(k));
+
+    // Política Zero-Trust: Únicamente Administrador tiene acceso total
+    return rol === 'ADMIN' || rol === 'ADMINISTRADOR' || rol.startsWith('ADMINISTRADOR');
   },
 
   currentUserName() {
@@ -164,6 +165,14 @@ window.addEventListener('message', (event) => {
   }
 });
 
+// Delegación global de eventos para botones de sincronización (inmune a re-renders)
+document.addEventListener('click', (e) => {
+  const syncBtn = e.target.closest('#sync-badge, #btnSyncMobile, #btnRefreshCargos, #btnRefreshHistorico');
+  if (syncBtn) {
+    window.forzarSincronizacionManual(e);
+  }
+});
+
 document.addEventListener('DOMContentLoaded', async () => {
   await SyncEngine.init({
     apiUrl: API_URL,
@@ -186,13 +195,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (btnSubmit) btnSubmit.disabled = true;
     }
   }, 4000);
-
-// Conectar TODOS los botones de sincronización al motor manual
-  document.getElementById('sync-badge')?.addEventListener('click', window.forzarSincronizacionManual);
-  document.getElementById('btnSyncMobile')?.addEventListener('click', window.forzarSincronizacionManual);
-  document.getElementById('btnRefreshCargos')?.addEventListener('click', window.forzarSincronizacionManual);
-  document.getElementById('btnRefreshHistorico')?.addEventListener('click', window.forzarSincronizacionManual);
-  
 });
 
 function actualizarUIUsuario() {
@@ -212,7 +214,7 @@ function actualizarUIUsuario() {
 }
 
 // ==========================================
-// 3. UI DE SINCRONIZACIÓN TIPO APPSHEET
+// 3. UI Y MOTOR DE SINCRONIZACIÓN MANUAL BLINDADO
 // ==========================================
 function actualizarBadgeSync(pendingCount, isOnline) {
   const badgeDesktop = document.getElementById('sync-badge');
@@ -250,57 +252,119 @@ function actualizarBadgeSync(pendingCount, isOnline) {
 }
 
 function handleRemoteSyncUpdate({ cargosActivos, historial }) {
-  if (cargosActivos) {
+  if (Array.isArray(cargosActivos)) {
     AppState.cargosActivos = cargosActivos.map(cargo => ({
       ...cargo,
       _horaSort: estandarizarFecha(cargo.hora)
     }));
-    if (!document.getElementById('viewDescargo').classList.contains('hidden')) {
+    if (!document.getElementById('viewDescargo')?.classList.contains('hidden')) {
       renderizarCargosFiltrados();
     }
   }
-  if (historial) {
+  if (Array.isArray(historial)) {
     AppState.historial = historial;
-    if (!document.getElementById('viewHistorico').classList.contains('hidden')) {
+    if (!document.getElementById('viewHistorico')?.classList.contains('hidden')) {
       renderizarHistorico();
     }
   }
 }
 
-/**
- * Ejecuta una sincronización manual forzada:
- * 1. Sube cualquier mutación local pendiente en IndexedDB.
- * 2. Descarga el estado más reciente desde Google Sheets (sin caché).
- * 3. Refresca la vista activa inmediatamente.
- */
-window.forzarSincronizacionManual = async function () {
+window.forzarSincronizacionManual = async function (e) {
+  if (e && typeof e.preventDefault === 'function') e.preventDefault();
+
+  if (isManualSyncRunning) return;
+
   if (!navigator.onLine) {
     mostrarToast("Sin conexión a internet. Operando en modo offline.", "error");
     return;
   }
 
+  isManualSyncRunning = true;
   const iconDesktop = document.getElementById('sync-icon');
   const textDesktop = document.getElementById('sync-text');
+  const btnMobile = document.getElementById('btnSyncMobile');
+
   if (iconDesktop) iconDesktop.classList.add('animate-spin-sync');
   if (textDesktop) textDesktop.textContent = 'Sincronizando...';
+  if (btnMobile) btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span><span>Buscando...</span>`;
 
   try {
-    // 1. Subir mutaciones pendientes si existieran
-    await SyncEngine.processQueue();
-    // 2. Descargar estado remoto fresco (bypass de caché HTTP)
-    await SyncEngine.pullLatestState(true);
+    // 1. Vaciar cola de mutaciones locales si existiera
+    if (typeof SyncEngine !== 'undefined' && typeof SyncEngine.processQueue === 'function') {
+      await SyncEngine.processQueue();
+    }
 
-    // 3. Re-renderizar vistas activas
+    // 2. Verificar que no queden ítems locales pendientes antes de pisar con datos remotos
+    let pendingItems = [];
+    if (typeof SyncEngine !== 'undefined' && typeof SyncEngine.getQueueItems === 'function') {
+      pendingItems = await SyncEngine.getQueueItems();
+    }
+
+    if (pendingItems.length > 0) {
+      mostrarToast(`Aún hay ${pendingItems.length} registros pendientes por subir.`, "error");
+      return;
+    }
+
+    // 3. Descarga directa con Cache-Buster garantizado (evita caché 302 de GAS)
+    const bust = `_t=${Date.now()}`;
+    const tokenParam = encodeURIComponent(API_SECRET_TOKEN);
+
+    const [resCargos, resHistory] = await Promise.all([
+      fetch(`${API_URL}?action=getActiveCargos&token=${tokenParam}&${bust}`, {
+        method: "GET",
+        redirect: "follow",
+        cache: "no-store"
+      }),
+      fetch(`${API_URL}?action=getHistory&token=${tokenParam}&${bust}`, {
+        method: "GET",
+        redirect: "follow",
+        cache: "no-store"
+      })
+    ]);
+
+    if (!resCargos.ok || !resHistory.ok) {
+      throw new Error(`Error HTTP (${resCargos.status} / ${resHistory.status})`);
+    }
+
+    const jsonCargos = await resCargos.json();
+    const jsonHistory = await resHistory.json();
+
+    if (jsonCargos.status === "error") throw new Error(jsonCargos.message);
+    if (jsonHistory.status === "error") throw new Error(jsonHistory.message);
+
+    if (Array.isArray(jsonCargos.data)) {
+      await SyncEngine.saveCache('cargosActivos', jsonCargos.data);
+    }
+    if (Array.isArray(jsonHistory.data)) {
+      await SyncEngine.saveCache('historial', jsonHistory.data);
+    }
+
+    handleRemoteSyncUpdate({
+      cargosActivos: jsonCargos.data,
+      historial: jsonHistory.data
+    });
+
+    // Forzar repintado de ambas vistas en memoria
     renderizarCargosFiltrados();
     renderizarHistorico();
 
-    mostrarToast("Datos actualizados desde el servidor.");
+    mostrarToast("Datos sincronizados con Google Sheets.");
   } catch (err) {
+    console.error("[SyncManual] Error:", err);
     mostrarToast(`Error al sincronizar: ${err.message}`, "error");
   } finally {
+    isManualSyncRunning = false;
     if (iconDesktop) iconDesktop.classList.remove('animate-spin-sync');
-    const q = await SyncEngine.getQueueItems();
-    actualizarBadgeSync(q.length, navigator.onLine);
+
+    let pendingCount = 0;
+    try {
+      if (typeof SyncEngine !== 'undefined' && typeof SyncEngine.getQueueItems === 'function') {
+        const q = await SyncEngine.getQueueItems();
+        pendingCount = Array.isArray(q) ? q.length : 0;
+      }
+    } catch (_) {}
+
+    actualizarBadgeSync(pendingCount, navigator.onLine);
   }
 };
 
@@ -330,7 +394,11 @@ async function initApp() {
   }
 
   try {
-    const res = await fetch(`${API_URL}?action=getInitData&token=${API_SECRET_TOKEN}`, { method: "GET", redirect: "follow" });
+    const res = await fetch(`${API_URL}?action=getInitData&token=${API_SECRET_TOKEN}&_t=${Date.now()}`, {
+      method: "GET",
+      redirect: "follow",
+      cache: "no-store"
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const json = await res.json();
@@ -345,7 +413,6 @@ async function initApp() {
     }
 
     SyncEngine.pullLatestState();
-
   } catch (err) {
     console.warn("[InitApp] Falló actualización remota, operando con caché local:", err.message);
     if (!cachedMaestros) {
@@ -548,9 +615,6 @@ const GenDialog = (() => {
     }, 180);
   }
 
-  /**
-   * Diálogo de Confirmación (Reemplaza window.confirm)
-   */
   function confirm({ title, message, badge = 'Confirmación', confirmText = 'Sí, eliminar', variant = 'danger' }) {
     return new Promise((resolve) => {
       ensureDOM();
@@ -608,9 +672,6 @@ const GenDialog = (() => {
     });
   }
 
-  /**
-   * Diálogo Dual de Edición de Cantidades (Reemplaza los 2 window.prompt seguidos)
-   */
   function editQuantities({ idDetalle, llevaActual, devuelveActual }) {
     return new Promise((resolve) => {
       ensureDOM();
@@ -719,7 +780,6 @@ function construirUI() {
   setupAutocomplete("inDestino", "hdDestino", "listDestino", () => AppState.datos.destinos, "REFERENCIA", "ID_DSTN", "inMaterial");
   setupAutocomplete("inMaterial", "hdMaterial", "listMaterial", () => AppState.datos.materiales, "DESCRIPCION", "ID_MEMB", "inCantidad");
 
-  // Autocompletados del Sub-Panel "Añadir Ítem Extra" dentro del Modal de Liquidación
   setupAutocomplete("inExtraDestino", "hdExtraDestino", "listExtraDestino", () => AppState.datos.destinos, "REFERENCIA", "ID_DSTN", "inExtraMaterial");
   setupAutocomplete("inExtraMaterial", "hdExtraMaterial", "listExtraMaterial", () => AppState.datos.materiales, "DESCRIPCION", "ID_MEMB", "inExtraCantidad");
 
@@ -852,7 +912,9 @@ function agregarItemLista() {
     cantidad, m3Unitario, m3Total: m3Unitario * cantidad
   });
 
-  document.getElementById("hdMaterial").value = ""; document.getElementById("inMaterial").value = ""; document.getElementById("inCantidad").value = "";
+  document.getElementById("hdMaterial").value = "";
+  document.getElementById("inMaterial").value = "";
+  document.getElementById("inCantidad").value = "";
   renderizarListaItems();
 }
 
@@ -992,7 +1054,7 @@ async function handleFormSubmit(e) {
   });
 
   if (document.getElementById("chkAutoPrint")?.checked) {
-    generarDocumentoImpresion(idLocal);
+    generarDocumentoImpresion(idLocal, 'A4');
   }
 
   mostrarToast(`Cargo ${idLocal} registrado. Sincronizando en segundo plano...`);
@@ -1400,7 +1462,6 @@ function renderizarTablaUI(cargos) {
 // ==========================================
 // 10. MODAL DETALLE, AÑADIR ÍTEM EXTRA, EDITAR Y ELIMINAR
 // ==========================================
-
 const FALLBACK_TRUCK_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 450'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%231e293b'/%3E%3Cstop offset='100%25' stop-color='%230f172a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='450' fill='url(%23g)'/%3E%3Cg transform='translate(280,115)' fill='none' stroke='%2338bdf8' stroke-width='10' stroke-linecap='round' stroke-linejoin='round' opacity='0.35'%3E%3Crect x='10' y='30' width='140' height='100' rx='10'/%3E%3Cpath d='M150 65h45l30 35v30h-75z'/%3E%3Ccircle cx='55' cy='145' r='22'/%3E%3Ccircle cx='185' cy='145' r='22'/%3E%3C/g%3E%3C/svg%3E";
 
 function resolverUrlImagenVehiculo(rawUrl) {
@@ -1444,7 +1505,7 @@ document.getElementById("btnGuardarExtraModal")?.addEventListener("click", async
 
   const destinoId = document.getElementById("hdExtraDestino").value;
   const materialId = document.getElementById("hdExtraMaterial").value;
-  const tipoMov = document.getElementById("selExtraTipo").value; // "DEVUELVE" o "LLEVA"
+  const tipoMov = document.getElementById("selExtraTipo").value;
   const cantidad = parseInt(document.getElementById("inExtraCantidad").value, 10);
 
   if (!destinoId) return mostrarAlerta("Selecciona un DESTINO válido.", "warning", "Falta Destino");
@@ -1507,7 +1568,6 @@ document.getElementById("btnGuardarExtraModal")?.addEventListener("click", async
     await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
   }
 
-  // Reflejar inmediatamente en Histórico local
   const ahora = new Date();
   const fechaFormat = `${ahora.getDate().toString().padStart(2, '0')}/${(ahora.getMonth() + 1).toString().padStart(2, '0')}/${ahora.getFullYear()} ${ahora.getHours().toString().padStart(2, '0')}:${ahora.getMinutes().toString().padStart(2, '0')}:${ahora.getSeconds().toString().padStart(2, '0')}`;
   AppState.historial.unshift({
@@ -1556,27 +1616,23 @@ document.getElementById("btnGuardarExtraModal")?.addEventListener("click", async
   if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
 });
 
-// 10.2 CORREGIR CANTIDADES ERRADAS DE UNA LÍNEA (LLEVA / DEVUELVE)
+// 10.2 CORREGIR CANTIDADES ERRADAS DE UNA LÍNEA (GenDialog)
 window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, devuelveActual) {
   if (String(idDetalle).startsWith("LOC-")) {
     return mostrarAlerta("Espera unos segundos a que esta línea termine de sincronizarse con la nube.", "warning", "Sincronizando");
   }
 
-  const nuevoLlevaStr = prompt("Corregir cantidad LLEVADA (Salida):", llevaActual);
-  if (nuevoLlevaStr === null) return;
-  const nuevoDevuelveStr = prompt("Corregir cantidad DEVUELTA (Retorno):", devuelveActual);
-  if (nuevoDevuelveStr === null) return;
+  const resultado = await GenDialog.editQuantities({
+    idDetalle,
+    llevaActual,
+    devuelveActual
+  });
 
-  const nuevoLleva = parseInt(nuevoLlevaStr, 10);
-  const nuevoDevuelve = parseInt(nuevoDevuelveStr, 10);
+  if (!resultado) return;
 
-  if (isNaN(nuevoLleva) || nuevoLleva < 0 || isNaN(nuevoDevuelve) || nuevoDevuelve < 0) {
-    return mostrarAlerta("Las cantidades deben ser números enteros mayores o iguales a 0.", "error", "Valor Inválido");
-  }
-
+  const { lleva: nuevoLleva, devuelve: nuevoDevuelve } = resultado;
   const nuevaDeuda = nuevoLleva - nuevoDevuelve;
 
-  // Actualizar en cargosActivos
   let cargoIdx = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
   if (cargoIdx !== -1) {
     const det = AppState.cargosActivos[cargoIdx].detalles.find(d => d.ID_DETALLE === idDetalle);
@@ -1591,7 +1647,6 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
     }
     await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
   } else if (nuevaDeuda !== 0) {
-    // Si estaba cerrado en histórico y la corrección genera deuda o excedente, reabrir en activos
     const lineasHist = AppState.historial.filter(h => h.idCargo === idCargo);
     if (lineasHist.length > 0) {
       const ref = lineasHist[0];
@@ -1620,7 +1675,6 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
     }
   }
 
-  // Actualizar en historial
   const histItem = AppState.historial.find(h => h.idDetalle === idDetalle);
   if (histItem) {
     histItem.lleva = nuevoLleva;
@@ -1647,13 +1701,21 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
   if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
 };
 
-// 10.3 ELIMINAR LÍNEA ERRADA O CARGO COMPLETO
+// 10.3 ELIMINAR LÍNEA ERRADA O CARGO COMPLETO (GenDialog)
 window.eliminarLineaDetalle = async function (idCargo, idDetalle, nombreMaterial) {
   if (String(idDetalle).startsWith("LOC-")) {
     return mostrarAlerta("Espera unos segundos a que la línea se sincronice antes de eliminarla.", "warning", "Sincronizando");
   }
 
-  if (!confirm(`¿Eliminar "${nombreMaterial}" (${idDetalle}) de este cargo?\nEsta acción actualizará el saldo en Google Sheets.`)) return;
+  const confirmado = await GenDialog.confirm({
+    badge: 'Eliminar Ítem',
+    title: `¿Eliminar "${nombreMaterial}"?`,
+    message: `Se removerá la línea <strong class="font-mono text-gray-900 dark:text-white">${idDetalle}</strong> del cargo <strong class="font-mono text-gray-900 dark:text-white">${idCargo}</strong> y se recalculará el saldo en Google Sheets.`,
+    confirmText: 'Sí, eliminar ítem',
+    variant: 'danger'
+  });
+
+  if (!confirmado) return;
 
   let cargoVacio = false;
   const cargoIdx = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
@@ -1700,7 +1762,15 @@ window.eliminarCargoCompleto = async function (idCargo) {
     return mostrarAlerta("El cargo aún se está subiendo a la nube. Espera unos segundos.", "warning", "Sincronizando");
   }
 
-  if (!confirm(`⚠️ ¿ELIMINAR POR COMPLETO el cargo ${idCargo} y todos sus materiales?\nEsta acción borrará la cabecera y detalles en Google Sheets.`)) return;
+  const confirmado = await GenDialog.confirm({
+    badge: 'Acción Destructiva',
+    title: `¿Eliminar por completo el cargo ${idCargo}?`,
+    message: 'Esta operación eliminará permanentemente la cabecera y <strong>todos los materiales asociados</strong> en la base de datos de Google Sheets.',
+    confirmText: 'Eliminar Cargo Completo',
+    variant: 'danger'
+  });
+
+  if (!confirmado) return;
 
   AppState.cargosActivos = AppState.cargosActivos.filter(c => c.idCargo !== idCargo);
   AppState.historial = AppState.historial.filter(h => h.idCargo !== idCargo);
@@ -1725,7 +1795,6 @@ window.eliminarCargoCompleto = async function (idCargo) {
 function abrirDetalle(idCargo, highlightMaterialId = null) {
   let cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
 
-  // Si no está en cargosActivos (ya cerrado/liquidado), reconstruirlo desde Histórico
   if (!cargo) {
     const lineasHistorico = AppState.historial.filter((h) => h.idCargo === idCargo);
     if (lineasHistorico.length === 0) return;
@@ -1763,7 +1832,6 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
     btnDelCargo.onclick = puedeBorrarCargo ? () => eliminarCargoCompleto(cargo.idCargo) : null;
   }
 
-  // Controlar si el receptor puede añadir "Salida (LLEVA)" o solo "Retorno (DEVUELVE)"
   const selExtraTipo = document.getElementById("selExtraTipo");
   if (selExtraTipo) {
     const optLleva = selExtraTipo.querySelector('option[value="LLEVA"]');
@@ -1774,7 +1842,6 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
     }
   }
 
-  // Ocultar panel extra al abrir un cargo
   document.getElementById("panelAddExtraModal")?.classList.add("hidden");
 
   let totalMaterialesLlevados = 0, totalDeudaViaje = 0, totalM3Llevado = 0;
@@ -1835,7 +1902,7 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
     `;
   }
 
-  // 1. Renderizado Tabla Escritorio (Desktop) con RBAC/ABAC aplicado
+  // 1. Renderizado Tabla Escritorio (Desktop)
   const tablaHTML = detallesProcesados.map((det) => {
     const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, '"');
     const puedeEditarFila = AuthRules.canModifyLinea(cargo, det);
@@ -1869,13 +1936,13 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
           </div>
         </td>
         <td class="px-4 py-3.5">
-           <div class="flex items-center justify-center gap-3 text-xs bg-gray-50 dark:bg-gray-800/80 rounded-xl p-2 border border-gray-200 dark:border-gray-700 w-max mx-auto">
-              <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Lleva</span><span class="text-gray-900 dark:text-white font-black text-sm">${det.lleva}</span></div>
-              <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
-              <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Devuelto</span><span class="text-emerald-600 dark:text-emerald-400 font-black text-sm">${det.devuelve}</span></div>
-              <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
-              <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Deuda</span><span class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-500"} font-black text-sm">${det.deuda}</span></div>
-           </div>
+          <div class="flex items-center justify-center gap-3 text-xs bg-gray-50 dark:bg-gray-800/80 rounded-xl p-2 border border-gray-200 dark:border-gray-700 w-max mx-auto">
+            <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Lleva</span><span class="text-gray-900 dark:text-white font-black text-sm">${det.lleva}</span></div>
+            <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
+            <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Devuelto</span><span class="text-emerald-600 dark:text-emerald-400 font-black text-sm">${det.devuelve}</span></div>
+            <div class="w-px h-6 bg-gray-200 dark:bg-gray-700"></div>
+            <div class="flex flex-col items-center px-1"><span class="text-[9px] text-gray-500 uppercase font-bold">Deuda</span><span class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600 dark:text-amber-400" : "text-gray-500"} font-black text-sm">${det.deuda}</span></div>
+          </div>
         </td>
         <td class="px-4 py-3.5 w-32">
           <input type="number" min="0" max="${Math.max(0, det.deuda)}" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
@@ -1887,7 +1954,7 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
   }).join("");
   document.getElementById("mdlTablaMateriales").innerHTML = tablaHTML;
 
-  // 2. Renderizado Tarjetas Táctiles (Móvil) con RBAC/ABAC aplicado
+  // 2. Renderizado Tarjetas Táctiles (Móvil)
   const cardsMobileHTML = detallesProcesados.map((det) => {
     const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, '"');
     const puedeEditarFila = AuthRules.canModifyLinea(cargo, det);
@@ -1932,7 +1999,6 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
   }).join("");
   document.getElementById("mdlCardsMaterialesMobile").innerHTML = cardsMobileHTML;
 
-  // Sincronización bidireccional entre inputs desktop y mobile por data-id
   document.querySelectorAll(".mdl-return-input").forEach(inp => {
     inp.addEventListener("input", (e) => {
       const id = e.target.getAttribute("data-id");
@@ -1942,7 +2008,6 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
     });
   });
 
-  // Blindaje de integridad referencial para cargos locales (LOC-XXXXXX)
   const esCargoLocalSinSincronizar = String(cargo.idCargo).startsWith("LOC-");
   const btnLiq = document.getElementById("btnLiquidarModal");
   const btnTodo = document.getElementById("btnDevolverTodoModal");
@@ -1966,7 +2031,12 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
   }
 
   btnLiq.setAttribute("onclick", `procesarLiquidacionModal('${cargo.idCargo}')`);
-  document.getElementById("btnPrintModal").onclick = () => generarDocumentoImpresion(cargo.idCargo);
+
+  const btnPrintA4 = document.getElementById("btnPrintModal");
+  if (btnPrintA4) btnPrintA4.onclick = () => generarDocumentoImpresion(cargo.idCargo, 'A4');
+
+  const btnPrintTicket = document.getElementById("btnPrintTicketModal");
+  if (btnPrintTicket) btnPrintTicket.onclick = () => generarDocumentoImpresion(cargo.idCargo, 'TICKET');
 
   const inputsDesktop = document.querySelectorAll(".mdl-input-desktop:not([disabled])");
   inputsDesktop.forEach((input, index) => {
@@ -1992,7 +2062,6 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
   }, 50);
 }
 
-// LIQUIDACIÓN OPTIMISTA EN 0ms (Deduplicada por ID_DETALLE y con validación de tope)
 async function procesarLiquidacionModal(idCargo) {
   if (String(idCargo).startsWith("LOC-")) {
     return mostrarAlerta("Este cargo aún está pendiente de sincronización inicial. Espera a que obtenga su código oficial GCM.", "warning", "Sincronización en Curso");
@@ -2087,189 +2156,9 @@ document.getElementById("modalDetalle")?.addEventListener("click", (e) => {
   if (e.target.id === "modalDetalle") cerrarDetalle();
 });
 
-
-// 10.2 CORREGIR CANTIDADES ERRADAS DE UNA LÍNEA (LLEVA / DEVUELVE)
-window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, devuelveActual) {
-  if (String(idDetalle).startsWith("LOC-")) {
-    return mostrarAlerta("Espera unos segundos a que esta línea termine de sincronizarse con la nube.", "warning", "Sincronizando");
-  }
-
-  const resultado = await GenDialog.editQuantities({
-    idDetalle,
-    llevaActual,
-    devuelveActual
-  });
-
-  if (!resultado) return;
-
-  const { lleva: nuevoLleva, devuelve: nuevoDevuelve } = resultado;
-  const nuevaDeuda = nuevoLleva - nuevoDevuelve;
-
-  // Actualizar en cargosActivos
-  let cargoIdx = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
-  if (cargoIdx !== -1) {
-    const det = AppState.cargosActivos[cargoIdx].detalles.find(d => d.ID_DETALLE === idDetalle);
-    if (det) {
-      det.LLEVA = nuevoLleva;
-      det.DEVUELVE = nuevoDevuelve;
-      det.DEUDA = nuevaDeuda;
-    }
-    const tieneSaldo = AppState.cargosActivos[cargoIdx].detalles.some(d => parseInt(d.DEUDA || 0, 10) !== 0);
-    if (!tieneSaldo) {
-      AppState.cargosActivos.splice(cargoIdx, 1);
-    }
-    await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
-  } else if (nuevaDeuda !== 0) {
-    const lineasHist = AppState.historial.filter(h => h.idCargo === idCargo);
-    if (lineasHist.length > 0) {
-      const ref = lineasHist[0];
-      const respId = ref.chofer ? String(ref.chofer).replace(/'/g, "") : "";
-      const choferObj = AppState.datos.choferes.find(c => c.ID_CHFR === respId);
-      AppState.cargosActivos.unshift({
-        idCargo: ref.idCargo,
-        choferId: respId,
-        choferNombre: choferObj ? choferObj.NOMBRE : (ref.chofer || "Desconocido"),
-        placa: ref.placa || "S/N",
-        hora: ref.horaCargo || "--",
-        _horaSort: estandarizarFecha(ref.horaCargo),
-        gestor: ref.gestorCargo || "No registrado",
-        detalles: lineasHist.map(h => ({
-          ID_DETALLE: h.idDetalle,
-          LLEVA: h.idDetalle === idDetalle ? nuevoLleva : h.lleva,
-          DEVUELVE: h.idDetalle === idDetalle ? nuevoDevuelve : h.devuelve,
-          DEUDA: h.idDetalle === idDetalle ? nuevaDeuda : h.deuda,
-          DESTINO: h.destino,
-          MATERIAL: h.material,
-          EMISOR: h.emisor,
-          RESPONSABLE: respId
-        }))
-      });
-      await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
-    }
-  }
-
-  // Actualizar en historial
-  const histItem = AppState.historial.find(h => h.idDetalle === idDetalle);
-  if (histItem) {
-    histItem.lleva = nuevoLleva;
-    histItem.devuelve = nuevoDevuelve;
-    histItem.deuda = nuevaDeuda;
-    histItem.estado = nuevaDeuda > 0 ? "Pendiente" : (nuevaDeuda < 0 ? "Excedente" : "Devolución completa");
-    await SyncEngine.saveCache('historial', AppState.historial);
-  }
-
-  await SyncEngine.enqueueMutation('editDetalleCargo', {
-    data: {
-      idCargo,
-      idDetalle,
-      lleva: nuevoLleva,
-      devuelve: nuevoDevuelve,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
-      gestorRol: AuthRules.currentUserRole()
-    }
-  });
-
-  mostrarToast(`Registro ${idDetalle} corregido.`);
-  abrirDetalle(idCargo);
-  renderizarCargosFiltrados();
-  if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
-};
-
-// 10.3 ELIMINAR LÍNEA ERRADA O CARGO COMPLETO
-window.eliminarLineaDetalle = async function (idCargo, idDetalle, nombreMaterial) {
-  if (String(idDetalle).startsWith("LOC-")) {
-    return mostrarAlerta("Espera unos segundos a que la línea se sincronice antes de eliminarla.", "warning", "Sincronizando");
-  }
-
-  const confirmado = await GenDialog.confirm({
-    badge: 'Eliminar Ítem',
-    title: `¿Eliminar "${nombreMaterial}"?`,
-    message: `Se removerá la línea <strong class="font-mono text-gray-900 dark:text-white">${idDetalle}</strong> del cargo <strong class="font-mono text-gray-900 dark:text-white">${idCargo}</strong> y se recalculará el saldo en Google Sheets.`,
-    confirmText: 'Sí, eliminar ítem',
-    variant: 'danger'
-  });
-
-  if (!confirmado) return;
-
-  let cargoVacio = false;
-  const cargoIdx = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
-  if (cargoIdx !== -1) {
-    AppState.cargosActivos[cargoIdx].detalles = AppState.cargosActivos[cargoIdx].detalles.filter(d => d.ID_DETALLE !== idDetalle);
-    if (AppState.cargosActivos[cargoIdx].detalles.length === 0) {
-      AppState.cargosActivos.splice(cargoIdx, 1);
-      cargoVacio = true;
-    } else {
-      const tieneSaldo = AppState.cargosActivos[cargoIdx].detalles.some(d => parseInt(d.DEUDA || 0, 10) !== 0);
-      if (!tieneSaldo) AppState.cargosActivos.splice(cargoIdx, 1);
-    }
-    await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
-  }
-
-  AppState.historial = AppState.historial.filter(h => h.idDetalle !== idDetalle);
-  await SyncEngine.saveCache('historial', AppState.historial);
-
-  if (AppState.historial.filter(h => h.idCargo === idCargo).length === 0) {
-    cargoVacio = true;
-  }
-
-  await SyncEngine.enqueueMutation('deleteDetalleCargo', {
-    data: {
-      idCargo,
-      idDetalle,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
-      gestorRol: AuthRules.currentUserRole()
-    }
-  });
-
-  mostrarToast(`Ítem eliminado del cargo ${idCargo}.`);
-  if (cargoVacio) {
-    cerrarDetalle();
-  } else if (document.getElementById("modalDetalle") && !document.getElementById("modalDetalle").classList.contains("hidden")) {
-    abrirDetalle(idCargo);
-  }
-  renderizarCargosFiltrados();
-  if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
-};
-
-window.eliminarCargoCompleto = async function (idCargo) {
-  if (String(idCargo).startsWith("LOC-")) {
-    return mostrarAlerta("El cargo aún se está subiendo a la nube. Espera unos segundos.", "warning", "Sincronizando");
-  }
-
-  const confirmado = await GenDialog.confirm({
-    badge: 'Acción Destructiva',
-    title: `¿Eliminar por completo el cargo ${idCargo}?`,
-    message: 'Esta operación eliminará permanentemente la cabecera y <strong>todos los materiales asociados</strong> en la base de datos de Google Sheets.',
-    confirmText: 'Eliminar Cargo Completo',
-    variant: 'danger'
-  });
-
-  if (!confirmado) return;
-
-  AppState.cargosActivos = AppState.cargosActivos.filter(c => c.idCargo !== idCargo);
-  AppState.historial = AppState.historial.filter(h => h.idCargo !== idCargo);
-
-  await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
-  await SyncEngine.saveCache('historial', AppState.historial);
-
-  await SyncEngine.enqueueMutation('deleteCargo', {
-    data: {
-      idCargo,
-      gestorNombre: AppState.user ? AppState.user.nombre : 'Operador',
-      gestorRol: AuthRules.currentUserRole()
-    }
-  });
-
-  cerrarDetalle();
-  renderizarCargosFiltrados();
-  if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
-  mostrarToast(`Cargo ${idCargo} eliminado correctamente.`);
-};
-
 // ==========================================
 // 11. MÓDULO HISTÓRICO, KPIs Y EXPORTADOR CSV
 // ==========================================
-
 document.getElementById("inBuscarHistorico").addEventListener("input", renderizarHistorico);
 
 window.setHistorySort = function (key) {
@@ -2514,9 +2403,9 @@ window.abrirTrazabilidad = function (e, idDetalle) {
     globo.id = 'globo-trazabilidad';
     globo.className = 'absolute z-[100] hidden bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-600 p-4 w-80 text-left transform transition-opacity opacity-0';
     globo.innerHTML = `
-            <div id="trazabilidad-contenido" class="space-y-3"></div>
-            <div id="trazabilidad-flecha" class="absolute w-4 h-4 bg-white dark:bg-gray-900 border-b border-r border-gray-200 dark:border-gray-600 rotate-45 transition-all"></div>
-        `;
+      <div id="trazabilidad-contenido" class="space-y-3"></div>
+      <div id="trazabilidad-flecha" class="absolute w-4 h-4 bg-white dark:bg-gray-900 border-b border-r border-gray-200 dark:border-gray-600 rotate-45 transition-all"></div>
+    `;
     document.body.appendChild(globo);
 
     document.addEventListener('click', (ev) => {
@@ -2531,29 +2420,29 @@ window.abrirTrazabilidad = function (e, idDetalle) {
   const flecha = document.getElementById('trazabilidad-flecha');
 
   contenido.innerHTML = `
-        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/30 p-3 rounded-lg shadow-sm">
-          <p class="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
-            1. Despacho / Emisión
-          </p>
-          <p class="text-xs text-gray-700 dark:text-gray-200 mb-1"><span class="text-gray-500 mr-1">Gestor:</span> ${row.gestorCargo || 'No registrado'}</p>
-          <p class="text-xs text-gray-700 dark:text-gray-200 mb-2"><span class="text-gray-500 mr-1">Ruta:</span> <span class="font-bold text-gray-900 dark:text-gray-100">${row.emisorName}</span> ➔ <span class="font-bold text-gray-900 dark:text-gray-100">${row.destinoName}</span></p>
-          <p class="text-[10px] text-blue-700 dark:text-blue-300 font-mono bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded w-fit">${row.horaCargo || '--'}</p>
-        </div>
-        
-        <div class="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-500/30 p-3 rounded-lg shadow-sm">
-          <p class="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
-            2. Descargo / Devolución
-          </p>
-          ${row.horaDescargo ? `
-             <p class="text-xs text-gray-700 dark:text-gray-200 mb-2"><span class="text-gray-500 mr-1">Receptor:</span> ${row.gestorDescargo || 'No registrado'}</p>
-             <p class="text-[10px] text-emerald-700 dark:text-emerald-300 font-mono bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded w-fit">${row.horaDescargo}</p>
-          ` : `
-             <p class="text-xs text-gray-500 italic mt-1 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Bandejas aún en ruta...</p>
-          `}
-        </div>
-    `;
+    <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/30 p-3 rounded-lg shadow-sm">
+      <p class="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg>
+        1. Despacho / Emisión
+      </p>
+      <p class="text-xs text-gray-700 dark:text-gray-200 mb-1"><span class="text-gray-500 mr-1">Gestor:</span> ${row.gestorCargo || 'No registrado'}</p>
+      <p class="text-xs text-gray-700 dark:text-gray-200 mb-2"><span class="text-gray-500 mr-1">Ruta:</span> <span class="font-bold text-gray-900 dark:text-gray-100">${row.emisorName}</span> ➔ <span class="font-bold text-gray-900 dark:text-gray-100">${row.destinoName}</span></p>
+      <p class="text-[10px] text-blue-700 dark:text-blue-300 font-mono bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded w-fit">${row.horaCargo || '--'}</p>
+    </div>
+    
+    <div class="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-500/30 p-3 rounded-lg shadow-sm">
+      <p class="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+        2. Descargo / Devolución
+      </p>
+      ${row.horaDescargo ? `
+         <p class="text-xs text-gray-700 dark:text-gray-200 mb-2"><span class="text-gray-500 mr-1">Receptor:</span> ${row.gestorDescargo || 'No registrado'}</p>
+         <p class="text-[10px] text-emerald-700 dark:text-emerald-300 font-mono bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded w-fit">${row.horaDescargo}</p>
+      ` : `
+         <p class="text-xs text-gray-500 italic mt-1 flex items-center gap-1.5"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> Bandejas aún en ruta...</p>
+      `}
+    </div>
+  `;
 
   globo.classList.remove('hidden');
   globo.classList.remove('opacity-100');
@@ -2581,9 +2470,9 @@ window.abrirTrazabilidad = function (e, idDetalle) {
 };
 
 // ==========================================
-// 13. MOTOR DE IMPRESIÓN OFFLINE-READY
+// 13. MOTOR DE IMPRESIÓN DUAL (A4 Y TICKET 80MM OFFLINE-READY)
 // ==========================================
-function generarDocumentoImpresion(idCargo) {
+window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
   let cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
 
   if (!cargo) {
@@ -2599,6 +2488,7 @@ function generarDocumentoImpresion(idCargo) {
       choferNombre: choferObj ? choferObj.NOMBRE : (ref.chofer || "Desconocido"),
       placa: ref.placa || "S/N",
       hora: ref.horaCargo || "--",
+      gestor: ref.gestorCargo || "No registrado",
       firmaCargo: null,
       detalles: lineasHist.map((h) => ({
         LLEVA: h.lleva,
@@ -2614,7 +2504,7 @@ function generarDocumentoImpresion(idCargo) {
   const destinosSet = new Set();
   const resumenTipos = {};
 
-  const filasTablaHTML = cargo.detalles.map((d) => {
+  const itemsProcesados = cargo.detalles.map((d) => {
     const lleva = parseInt(d.LLEVA || 0, 10);
     totalLlevado += lleva;
     const destinoCat = AppState.datos.destinos.find((x) => x.ID_DSTN === d.DESTINO);
@@ -2628,116 +2518,271 @@ function generarDocumentoImpresion(idCargo) {
     destinosSet.add(nombreDestino);
     resumenTipos[nombreMaterial] = (resumenTipos[nombreMaterial] || 0) + lleva;
 
-    return `
-      <tr>
-        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; color: #4b5563;">${nombreDestino}</td>
-        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #1f2937;">${nombreMaterial}</td>
-        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: center; font-weight: 700; color: #111827;">${lleva}</td>
-        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: center;"></td>
-      </tr>
-    `;
-  }).join("");
+    return { nombreDestino, nombreMaterial, lleva };
+  });
 
-  const destinosHTML = Array.from(destinosSet).map((dest) => `<div>• ${dest}</div>`).join("");
-  const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span style="font-weight:700; margin-right:4px;">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
   const areaRaw = cargo.detalles[0]?.EMISOR || cargo.area || "Almacén PT";
   const areaCat = AppState.datos.destinos.find((x) => x.ID_DSTN === areaRaw);
   const areaResponsable = areaCat ? areaCat.REFERENCIA : areaRaw;
 
-  const htmlPlantilla = `
+  const logoSvgUri = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='60 20 280 160'%3E%3Cpath d='m200 25 135 47v56l-135 47-135-47V72z' fill='%23C51D23' stroke='%23C51D23' stroke-width='8' stroke-linejoin='round'/%3E%3Cpath d='m200 25 135 47v56l-135 47-135-47V72z' fill='none' stroke='%23B08D57' stroke-width='1' stroke-linejoin='round'/%3E%3Ctext x='200' y='86' font-family='Times, serif' font-size='36' font-weight='bold' text-anchor='middle' fill='%23404040'%3ELA%3C/text%3E%3Ctext x='200' y='85' font-family='Times, serif' font-size='36' font-weight='bold' text-anchor='middle' fill='%23FFF'%3ELA%3C/text%3E%3Ctext x='200' y='121' font-family='Times, serif' font-size='42' font-weight='bold' text-anchor='middle' fill='%23404040'%3EGENOVESA%3C/text%3E%3Ctext x='200' y='120' font-family='Times, serif' font-size='42' font-weight='bold' text-anchor='middle' fill='%23FFF'%3EGENOVESA%3C/text%3E%3Ctext x='200' y='145' font-family='Arial, sans-serif' font-size='12' text-anchor='middle' fill='%23FFF' letter-spacing='3'%3EDESDE 1977%3C/text%3E%3C/svg%3E";
+
+  let htmlPlantilla = "";
+
+  if (formato === 'TICKET') {
+    const filasTicketHTML = itemsProcesados.map((item) => `
+      <tr style="border-bottom: 1px dashed #9ca3af;">
+        <td style="padding: 4px 2px; vertical-align: top;">
+          <div style="font-weight: 700; font-size: 11px; line-height: 1.2;">${item.nombreMaterial}</div>
+          <div style="font-size: 9px; color: #374151;">Dest: ${item.nombreDestino}</div>
+        </td>
+        <td style="padding: 4px 2px; text-align: right; vertical-align: top; font-weight: 900; font-size: 12px; font-family: monospace;">
+          ${item.lleva}
+        </td>
+      </tr>
+    `).join("");
+
+    const resumenTicketHTML = Object.keys(resumenTipos).map((tipo) => `
+      <div style="display: flex; justify-content: space-between; font-size: 10px; line-height: 1.35;">
+        <span style="padding-right: 6px;">${tipo}</span>
+        <span style="font-weight: 800; font-family: monospace;">${resumenTipos[tipo]}</span>
+      </div>
+    `).join("");
+
+    htmlPlantilla = `
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <title>Cargo_${cargo.idCargo}_${cargo.choferNombre.replace(/\s+/g, "")}</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: system-ui, -apple-system, sans-serif; background-color: #f3f4f6; color: #1f2937; font-size: 12px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        .a4-container { max-width: 21cm; margin: 1rem auto; background: white; padding: 1cm; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1f2937; padding-bottom: 12px; margin-bottom: 16px; }
-        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; background: #f9fafb; padding: 12px; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 16px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-        th { background: #1f2937; color: white; font-size: 10px; text-transform: uppercase; padding: 6px 8px; text-align: left; }
-        tr:nth-child(even) { background-color: #f9fafb; }
-        .footer-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 16px; }
-        .btn-float { position: fixed; bottom: 24px; right: 24px; background: #1f2937; color: white; border: none; padding: 12px 24px; border-radius: 9999px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-        @media print {
-            body { background: white; }
-            .a4-container { margin: 0; padding: 0; box-shadow: none; max-width: 100%; }
-            .no-print { display: none !important; }
-            @page { size: A4 portrait; margin: 0.5cm; }
-        }
-    </style>
+  <meta charset="UTF-8">
+  <title>Ticket_${cargo.idCargo}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #e5e7eb;
+      color: #000000;
+      font-size: 11px;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    .ticket-wrapper {
+      width: 76mm;
+      max-width: 100%;
+      margin: 12px auto;
+      background: #ffffff;
+      padding: 4mm 3mm;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+    }
+    .center { text-align: center; }
+    .divider-dashed { border-top: 1px dashed #000; margin: 6px 0; }
+    .meta-row { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px; gap: 4px; }
+    .meta-label { font-weight: 700; text-transform: uppercase; }
+    table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    th {
+      font-size: 9px;
+      text-transform: uppercase;
+      border-top: 1px solid #000;
+      border-bottom: 1px solid #000;
+      padding: 3px 2px;
+      text-align: left;
+    }
+    .toolbar-float {
+      position: fixed; bottom: 16px; right: 16px;
+      display: flex; gap: 8px; z-index: 50;
+    }
+    .btn-float {
+      background: #111827; color: #fff; border: none;
+      padding: 10px 18px; border-radius: 9999px;
+      font-weight: 700; font-size: 12px; cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    }
+    .btn-secondary { background: #2563eb; }
+    @media print {
+      body { background: #ffffff; }
+      .ticket-wrapper {
+        width: 72mm;
+        margin: 0;
+        padding: 1mm 2mm;
+        box-shadow: none;
+      }
+      .no-print { display: none !important; }
+      @page { size: 80mm auto; margin: 0; }
+    }
+  </style>
 </head>
 <body>
-    <button onclick="window.print()" class="btn-float no-print">🖨️ Imprimir / Guardar PDF</button>
+  <div class="toolbar-float no-print">
+    <button onclick="window.opener?.generarDocumentoImpresion('${cargo.idCargo}', 'A4'); window.close();" class="btn-float btn-secondary">📄 Cambiar a A4</button>
+    <button onclick="window.print()" class="btn-float">🖨️ Imprimir Ticket</button>
+  </div>
 
-    <div class="a4-container">
-        <div class="header">
-            <div style="width: 140px;">
-                <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='60 20 280 160'%3E%3Cpath d='m200 25 135 47v56l-135 47-135-47V72z' fill='%23C51D23' stroke='%23C51D23' stroke-width='8' stroke-linejoin='round'/%3E%3Cpath d='m200 25 135 47v56l-135 47-135-47V72z' fill='none' stroke='%23B08D57' stroke-width='1' stroke-linejoin='round'/%3E%3Ctext x='200' y='86' font-family='Times, serif' font-size='36' font-weight='bold' text-anchor='middle' fill='%23404040'%3ELA%3C/text%3E%3Ctext x='200' y='85' font-family='Times, serif' font-size='36' font-weight='bold' text-anchor='middle' fill='%23FFF'%3ELA%3C/text%3E%3Ctext x='200' y='121' font-family='Times, serif' font-size='42' font-weight='bold' text-anchor='middle' fill='%23404040'%3EGENOVESA%3C/text%3E%3Ctext x='200' y='120' font-family='Times, serif' font-size='42' font-weight='bold' text-anchor='middle' fill='%23FFF'%3EGENOVESA%3C/text%3E%3Ctext x='200' y='145' font-family='Arial, sans-serif' font-size='12' text-anchor='middle' fill='%23FFF' letter-spacing='3'%3EDESDE 1977%3C/text%3E%3C/svg%3E" style="width:100%; height:auto;" alt="Logo La Genovesa">
-            </div>
-            <div style="text-align: right; margin-top: 8px;">
-                <h1 style="font-size: 18px; font-weight: 800; text-transform: uppercase;">Cargo de Embalajes</h1>
-                <p style="font-weight: 600; color: #4b5563;">La Genovesa Agroindustrias S.A.</p>
-                <p style="font-size: 10px; color: #6b7280; text-transform: uppercase;">${areaResponsable}</p>
-            </div>
-        </div>
-
-        <div class="info-grid">
-            <div>
-                <p style="font-size: 10px; color: #6b7280; font-weight: bold; text-transform: uppercase; margin-bottom: 4px;">Documento</p>
-                <p><strong>N° Cargo:</strong> <span style="font-family: monospace; background: white; border: 1px solid #d1d5db; padding: 2px 4px; border-radius: 4px;">${cargo.idCargo}</span></p>
-                <p style="margin-top: 4px;"><strong>Emisión:</strong> ${cargo.hora || "--"}</p>
-            </div>
-            <div>
-                <p style="font-size: 10px; color: #6b7280; font-weight: bold; text-transform: uppercase; margin-bottom: 4px;">Transporte</p>
-                <p><strong>Chofer:</strong> ${cargo.choferNombre}</p>
-                <p style="margin-top: 4px;"><strong>Vehículo:</strong> <span style="font-family: monospace; background: white; border: 1px solid #d1d5db; padding: 2px 4px; border-radius: 4px;">${cargo.placa || "S/N"}</span></p>
-            </div>
-        </div>
-
-        <table>
-            <thead>
-                <tr>
-                    <th style="width: 33%;">Destino</th>
-                    <th style="width: 33%;">Material</th>
-                    <th style="text-align: center;">Lleva</th>
-                    <th style="text-align: center;">Devolución</th>
-                </tr>
-            </thead>
-            <tbody style="border: 1px solid #e5e7eb;">
-                ${filasTablaHTML}
-            </tbody>
-            <tfoot>
-                <tr style="background: #f3f4f6; border-top: 1px solid #d1d5db;">
-                    <td colspan="2" style="padding: 8px; text-align: right; font-weight: bold; color: #4b5563; font-size: 10px; text-transform: uppercase;">Total General del Viaje:</td>
-                    <td style="padding: 8px; text-align: center; font-weight: 900; color: #1d4ed8; font-size: 14px;">${totalLlevado} und</td>
-                    <td style="padding: 8px; text-align: center; font-family: monospace; color: #059669; font-weight: bold;">${totalM3Llevado.toFixed(3)} m³</td>
-                </tr>
-            </tfoot>
-        </table>
-
-        <div class="footer-grid">
-            <div>
-                <h4 style="font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; padding-bottom: 2px; margin-bottom: 4px;">Destinos</h4>
-                <div style="font-size: 10px; color: #374151; line-height: 1.4;">${destinosHTML}</div>
-            </div>
-            <div>
-                <h4 style="font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; padding-bottom: 2px; margin-bottom: 4px;">Tipos de Material</h4>
-                <div style="font-size: 10px; color: #374151; font-family: monospace; line-height: 1.4;">${tiposHTML}</div>
-            </div>
-            <div style="display: flex; flex-direction: column; justify-content: flex-end; align-items: center;">
-                <div style="width: 100%; max-width: 180px; border-bottom: 1px dashed #1f2937; padding-bottom: 4px; display: flex; justify-content: center; align-items: flex-end; margin-bottom: 4px; min-height: 50px;">
-                    ${cargo.firmaCargo ? `<img src="${cargo.firmaCargo}" style="max-height: 45px; object-fit: contain;">` : ''}
-                </div>
-                <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; text-align: center;">${cargo.choferNombre}</p>
-                <p style="font-size: 9px; color: #6b7280; text-transform: uppercase; text-align: center;">Firma de Conformidad</p>
-            </div>
-        </div>
+  <div class="ticket-wrapper">
+    <div class="center">
+      <img src="${logoSvgUri}" style="width: 95px; height: auto; margin: 0 auto 2px auto; display: block;" alt="La Genovesa">
+      <div style="font-weight: 800; font-size: 11px;">LA GENOVESA AGROINDUSTRIAS S.A.</div>
+      <div style="font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;">${areaResponsable}</div>
+      <div style="font-weight: 900; font-size: 12px; margin-top: 4px; border: 1px solid #000; padding: 2px;">CARGO DE EMBALAJES</div>
     </div>
+
+    <div class="divider-dashed"></div>
+
+    <div class="meta-row"><span class="meta-label">N° Cargo:</span><span style="font-family: monospace; font-weight: 900; font-size: 12px;">${cargo.idCargo}</span></div>
+    <div class="meta-row"><span class="meta-label">Emisión:</span><span style="font-family: monospace;">${cargo.hora || "--"}</span></div>
+    <div class="meta-row"><span class="meta-label">Vehículo:</span><span style="font-family: monospace; font-weight: 800;">${cargo.placa || "S/N"}</span></div>
+    <div style="font-size: 10px; margin-top: 2px;"><span class="meta-label">Chofer:</span> ${cargo.choferNombre}</div>
+    <div style="font-size: 9px; margin-top: 1px;"><span class="meta-label">Despachó:</span> ${cargo.gestor || "No registrado"}</div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Material / Destino</th>
+          <th style="text-align: right;">Cant.</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${filasTicketHTML}
+      </tbody>
+    </table>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 2px; border-bottom: 1.5px solid #000; font-weight: 900; font-size: 12px;">
+      <span>TOTAL UNIDADES:</span>
+      <span style="font-family: monospace;">${totalLlevado} und (${totalM3Llevado.toFixed(2)} m³)</span>
+    </div>
+
+    <div style="margin-top: 5px;">
+      <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; margin-bottom: 2px;">Resumen por Material:</div>
+      ${resumenTicketHTML}
+    </div>
+
+    <div class="divider-dashed"></div>
+
+    <div class="center" style="margin-top: 6px;">
+      <div style="min-height: 46px; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid #000; width: 85%; margin: 0 auto 3px auto;">
+        ${cargo.firmaCargo ? `<img src="${cargo.firmaCargo}" style="max-height: 42px; object-fit: contain;">` : ''}
+      </div>
+      <div style="font-size: 10px; font-weight: 800; text-transform: uppercase;">${cargo.choferNombre}</div>
+      <div style="font-size: 8px; text-transform: uppercase;">Firma de Conformidad</div>
+    </div>
+
+    <div class="center" style="margin-top: 8px; font-size: 8px; color: #374151;">
+      GenLogistics • Control de Activos Retornables
+    </div>
+  </div>
 </body>
 </html>`;
+  } else {
+    const filasTablaHTML = itemsProcesados.map((item) => `
+      <tr>
+        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; color: #4b5563;">${item.nombreDestino}</td>
+        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #1f2937;">${item.nombreMaterial}</td>
+        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: center; font-weight: 700; color: #111827;">${item.lleva}</td>
+        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: center;"></td>
+      </tr>
+    `).join("");
+
+    const destinosHTML = Array.from(destinosSet).map((dest) => `<div>• ${dest}</div>`).join("");
+    const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span style="font-weight:700; margin-right:4px;">${resumenTipos[tipo]}</span> ${tipo}</div>`).join("");
+
+    htmlPlantilla = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Cargo_${cargo.idCargo}_${cargo.choferNombre.replace(/\s+/g, "")}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background-color: #f3f4f6; color: #1f2937; font-size: 12px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    .a4-container { max-width: 21cm; margin: 1rem auto; background: white; padding: 1cm; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1f2937; padding-bottom: 12px; margin-bottom: 16px; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; background: #f9fafb; padding: 12px; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    th { background: #1f2937; color: white; font-size: 10px; text-transform: uppercase; padding: 6px 8px; text-align: left; }
+    tr:nth-child(even) { background-color: #f9fafb; }
+    .footer-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 16px; }
+    .toolbar-float { position: fixed; bottom: 24px; right: 24px; display: flex; gap: 10px; }
+    .btn-float { background: #1f2937; color: white; border: none; padding: 12px 24px; border-radius: 9999px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+    .btn-secondary { background: #2563eb; }
+    @media print {
+      body { background: white; }
+      .a4-container { margin: 0; padding: 0; box-shadow: none; max-width: 100%; }
+      .no-print { display: none !important; }
+      @page { size: A4 portrait; margin: 0.5cm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar-float no-print">
+    <button onclick="window.opener?.generarDocumentoImpresion('${cargo.idCargo}', 'TICKET'); window.close();" class="btn-float btn-secondary">🧾 Cambiar a Ticket 80mm</button>
+    <button onclick="window.print()" class="btn-float">🖨️ Imprimir / Guardar PDF</button>
+  </div>
+
+  <div class="a4-container">
+    <div class="header">
+      <div style="width: 140px;">
+        <img src="${logoSvgUri}" style="width:100%; height:auto;" alt="Logo La Genovesa">
+      </div>
+      <div style="text-align: right; margin-top: 8px;">
+        <h1 style="font-size: 18px; font-weight: 800; text-transform: uppercase;">Cargo de Embalajes</h1>
+        <p style="font-weight: 600; color: #4b5563;">La Genovesa Agroindustrias S.A.</p>
+        <p style="font-size: 10px; color: #6b7280; text-transform: uppercase;">${areaResponsable}</p>
+      </div>
+    </div>
+
+    <div class="info-grid">
+      <div>
+        <p style="font-size: 10px; color: #6b7280; font-weight: bold; text-transform: uppercase; margin-bottom: 4px;">Documento</p>
+        <p><strong>N° Cargo:</strong> <span style="font-family: monospace; background: white; border: 1px solid #d1d5db; padding: 2px 4px; border-radius: 4px;">${cargo.idCargo}</span></p>
+        <p style="margin-top: 4px;"><strong>Emisión:</strong> ${cargo.hora || "--"}</p>
+      </div>
+      <div>
+        <p style="font-size: 10px; color: #6b7280; font-weight: bold; text-transform: uppercase; margin-bottom: 4px;">Transporte</p>
+        <p><strong>Chofer:</strong> ${cargo.choferNombre}</p>
+        <p style="margin-top: 4px;"><strong>Vehículo:</strong> <span style="font-family: monospace; background: white; border: 1px solid #d1d5db; padding: 2px 4px; border-radius: 4px;">${cargo.placa || "S/N"}</span></p>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 33%;">Destino</th>
+          <th style="width: 33%;">Material</th>
+          <th style="text-align: center;">Lleva</th>
+          <th style="text-align: center;">Devolución</th>
+        </tr>
+      </thead>
+      <tbody style="border: 1px solid #e5e7eb;">
+        ${filasTablaHTML}
+      </tbody>
+      <tfoot>
+        <tr style="background: #f3f4f6; border-top: 1px solid #d1d5db;">
+          <td colspan="2" style="padding: 8px; text-align: right; font-weight: bold; color: #4b5563; font-size: 10px; text-transform: uppercase;">Total General del Viaje:</td>
+          <td style="padding: 8px; text-align: center; font-weight: 900; color: #1d4ed8; font-size: 14px;">${totalLlevado} und</td>
+          <td style="padding: 8px; text-align: center; font-family: monospace; color: #059669; font-weight: bold;">${totalM3Llevado.toFixed(3)} m³</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div class="footer-grid">
+      <div>
+        <h4 style="font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; padding-bottom: 2px; margin-bottom: 4px;">Destinos</h4>
+        <div style="font-size: 10px; color: #374151; line-height: 1.4;">${destinosHTML}</div>
+      </div>
+      <div>
+        <h4 style="font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; padding-bottom: 2px; margin-bottom: 4px;">Tipos de Material</h4>
+        <div style="font-size: 10px; color: #374151; font-family: monospace; line-height: 1.4;">${tiposHTML}</div>
+      </div>
+      <div style="display: flex; flex-direction: column; justify-content: flex-end; align-items: center;">
+        <div style="width: 100%; max-width: 180px; border-bottom: 1px dashed #1f2937; padding-bottom: 4px; display: flex; justify-content: center; align-items: flex-end; margin-bottom: 4px; min-height: 50px;">
+          ${cargo.firmaCargo ? `<img src="${cargo.firmaCargo}" style="max-height: 45px; object-fit: contain;">` : ''}
+        </div>
+        <p style="font-size: 10px; font-weight: bold; text-transform: uppercase; text-align: center;">${cargo.choferNombre}</p>
+        <p style="font-size: 9px; color: #6b7280; text-transform: uppercase; text-align: center;">Firma de Conformidad</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+  }
 
   const printWindow = window.open("", "_blank");
   if (printWindow) {
@@ -2745,4 +2790,4 @@ function generarDocumentoImpresion(idCargo) {
     printWindow.document.write(htmlPlantilla);
     printWindow.document.close();
   }
-}
+};
