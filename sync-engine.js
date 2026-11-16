@@ -211,36 +211,53 @@ const SyncEngine = (() => {
         }
     }
 
-    async function pullLatestState() {
+    async function pullLatestState(force = false) {
         // PROHIBIDO hacer Pull si hay cambios locales sin subir (evita sobrescribir Optimistic UI)
         const pending = await getQueueItems();
-        if (pending.length > 0 || !navigator.onLine || isSyncing) return;
+        if (pending.length > 0 || !navigator.onLine || isSyncing) return false;
 
         try {
+            const bust = `_t=${Date.now()}`;
+            const tokenParam = encodeURIComponent(config.token);
+
             const [resCargos, resHistory] = await Promise.all([
-                fetch(`${config.apiUrl}?action=getActiveCargos&token=${config.token}`, { redirect: 'follow' }),
-                fetch(`${config.apiUrl}?action=getHistory&token=${config.token}`, { redirect: 'follow' })
+                fetch(`${config.apiUrl}?action=getActiveCargos&token=${tokenParam}&${bust}`, {
+                    method: 'GET',
+                    redirect: 'follow',
+                    cache: 'no-store'
+                }),
+                fetch(`${config.apiUrl}?action=getHistory&token=${tokenParam}&${bust}`, {
+                    method: 'GET',
+                    redirect: 'follow',
+                    cache: 'no-store'
+                })
             ]);
+
+            if (!resCargos.ok || !resHistory.ok) {
+                throw new Error(`HTTP Error (${resCargos.status} / ${resHistory.status})`);
+            }
 
             const jsonCargos = await resCargos.json();
             const jsonHistory = await resHistory.json();
 
-            if (jsonCargos.status === 'success') {
+            if (jsonCargos.status === 'success' && Array.isArray(jsonCargos.data)) {
                 await saveCache('cargosActivos', jsonCargos.data);
             }
-            if (jsonHistory.status === 'success') {
+            if (jsonHistory.status === 'success' && Array.isArray(jsonHistory.data)) {
                 await saveCache('historial', jsonHistory.data);
             }
 
-            // Notificar a la UI para que repinte silenciosamente si es necesario
+            // Notificar a la UI para que repinte con los datos frescos del servidor
             config.onRemoteDataSync({
                 cargosActivos: jsonCargos.status === 'success' ? jsonCargos.data : null,
                 historial: jsonHistory.status === 'success' ? jsonHistory.data : null
             });
 
+            return true;
         } catch (err) {
-            // Silencioso: si falla el pull en segundo plano, el usuario sigue trabajando con IndexedDB
-            console.debug('[SyncEngine] Background pull omitido por red inestable.');
+            if (force) throw err; // Si el usuario pulsó el botón, propagar error para mostrar Toast
+            console.debug('[SyncEngine] Background pull omitido por red inestable:', err.message);
+            return false;
         }
     }
 
@@ -336,6 +353,7 @@ const SyncEngine = (() => {
         saveCache,
         getCache,
         enqueueMutation,
+        getQueue: getQueueItems,
         getQueueItems,
         processQueue,
         pullLatestState,
