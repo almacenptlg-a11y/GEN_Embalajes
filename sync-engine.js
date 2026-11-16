@@ -145,7 +145,16 @@ const SyncEngine = (() => {
     // ==========================================
     // 4. WORKER DE SINCRONIZACIÓN (PUSH & PULL)
     // ==========================================
+   
+let syncStartedAt = 0; // Watchdog anti-deadlock
+
     async function processQueue() {
+        // Si isSyncing lleva más de 20s activo, liberar el lock por timeout de red
+        if (isSyncing && (Date.now() - syncStartedAt > 20000)) {
+            console.warn('[SyncEngine] Liberando lock de sincronización por timeout (>20s).');
+            isSyncing = false;
+        }
+
         if (isSyncing || !navigator.onLine) {
             await notifyQueueStatus();
             return;
@@ -158,17 +167,17 @@ const SyncEngine = (() => {
         }
 
         isSyncing = true;
+        syncStartedAt = Date.now();
         await notifyQueueStatus();
 
-        // Procesamiento estricto secuencial (FIFO) para mantener integridad referencial
         for (const item of queue) {
-            if (!navigator.onLine) break; // Abortar si se cae la red a mitad de lote
+            if (!navigator.onLine) break;
 
             try {
                 const bodyPayload = {
                     action: item.action,
                     token: config.token,
-                    client_uuid: item.uuid, // Clave de idempotencia para GAS
+                    client_uuid: item.uuid,
                     ...item.payload
                 };
 
@@ -180,41 +189,54 @@ const SyncEngine = (() => {
                 });
 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                
                 const result = await response.json();
 
                 if (result.status === 'success') {
-                    // Transacción confirmada por el servidor: eliminar de Outbox
                     await removeQueueItem(item.id);
                     await notifyQueueStatus();
                 } else {
-                    // Error lógico controlado desde GAS (ej. validación)
                     console.error(`[SyncEngine] Rechazo del servidor en ${item.action}:`, result.message);
                     config.onSyncError(result.message, item);
-                    // Opcional: Si es un error irrecuperable de negocio, remover para no atascar la cola
                     if (result.fatal) await removeQueueItem(item.id);
                     break;
                 }
             } catch (networkErr) {
-                console.warn('[SyncEngine] Microcorte de red durante Push. Reintentando luego...', networkErr);
-                break; // Salir del bucle y esperar al próximo trigger/polling
+                console.warn('[SyncEngine] Microcorte de red durante Push:', networkErr);
+                break;
             }
         }
 
         isSyncing = false;
+        syncStartedAt = 0;
         await notifyQueueStatus();
 
-        // Si la cola quedó limpia tras hacer Push, traer el estado real consolidado del servidor
         const remaining = await getQueueItems();
         if (remaining.length === 0 && navigator.onLine) {
-            pullLatestState();
+            await pullLatestState(false);
         }
     }
 
     async function pullLatestState(force = false) {
-        // PROHIBIDO hacer Pull si hay cambios locales sin subir (evita sobrescribir Optimistic UI)
-        const pending = await getQueueItems();
-        if (pending.length > 0 || !navigator.onLine || isSyncing) return false;
+        if (!navigator.onLine) {
+            if (force) throw new Error("Sin conexión a internet.");
+            return false;
+        }
+
+        // Si NO es forzado, respetar locks y cola pendiente
+        if (!force) {
+            const pending = await getQueueItems();
+            if (pending.length > 0 || isSyncing) return false;
+        } else {
+            // Si ES forzado por clic del usuario, intentar vaciar cola primero
+            const pending = await getQueueItems();
+            if (pending.length > 0) {
+                await processQueue();
+                const stillPending = await getQueueItems();
+                if (stillPending.length > 0) {
+                    throw new Error(`Hay ${stillPending.length} registro(s) local(es) sin poder subirse. Revisa tu conexión.`);
+                }
+            }
+        }
 
         try {
             const bust = `_t=${Date.now()}`;
@@ -240,6 +262,9 @@ const SyncEngine = (() => {
             const jsonCargos = await resCargos.json();
             const jsonHistory = await resHistory.json();
 
+            if (jsonCargos.status === 'error') throw new Error(jsonCargos.message);
+            if (jsonHistory.status === 'error') throw new Error(jsonHistory.message);
+
             if (jsonCargos.status === 'success' && Array.isArray(jsonCargos.data)) {
                 await saveCache('cargosActivos', jsonCargos.data);
             }
@@ -247,7 +272,6 @@ const SyncEngine = (() => {
                 await saveCache('historial', jsonHistory.data);
             }
 
-            // Notificar a la UI para que repinte con los datos frescos del servidor
             config.onRemoteDataSync({
                 cargosActivos: jsonCargos.status === 'success' ? jsonCargos.data : null,
                 historial: jsonHistory.status === 'success' ? jsonHistory.data : null
@@ -255,12 +279,11 @@ const SyncEngine = (() => {
 
             return true;
         } catch (err) {
-            if (force) throw err; // Si el usuario pulsó el botón, propagar error para mostrar Toast
-            console.debug('[SyncEngine] Background pull omitido por red inestable:', err.message);
+            if (force) throw err;
+            console.debug('[SyncEngine] Background pull omitido:', err.message);
             return false;
         }
     }
-
     // ==========================================
     // 5. COMPRESIÓN EDGE PARA FIRMAS (CANVAS)
     // ==========================================
