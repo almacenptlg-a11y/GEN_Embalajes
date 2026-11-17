@@ -21,6 +21,63 @@ const SyncEngine = (() => {
         onSyncError: () => {}         // Callback silencioso o de log
     };
 
+    /**
+ * ============================================================================
+ * MÓDULO: SINCRONIZACIÓN DE MAESTROS (INDEXEDDB + VERSION CHECK)
+ * ============================================================================
+ */
+const SyncMaestros = {
+  /**
+   * Filtra emisores y destinos de forma tolerante a mayúsculas/espacios
+   */
+  parsearCatalogos(destinosRaw = []) {
+    const destinos = destinosRaw.map(d => ({
+      id: String(d.ID_DSTN || '').trim(),
+      referencia: String(d.REFERENCIA || '').trim(),
+      zona: String(d.ZONA || 'SIN ZONA').trim(),
+      esEmisor: ['SI', 'SÍ', 'TRUE', '1', 'X'].includes(
+        String(d.EMISOR || '').trim().toUpperCase()
+      ),
+      ruta: String(d.RUTA || '').trim(),
+      direccion: String(d.DIRECCION || '').trim()
+    }));
+
+    const emisores = destinos.filter(d => d.esEmisor);
+    return { destinos, emisores };
+  },
+
+  /**
+   * Fuerza actualización desde GAS si cambió MAESTROS_VERSION o el usuario pulsó Sincronizar
+   */
+  async refrescarSiNecesario(apiUrl, force = false) {
+    if (!navigator.onLine) return false;
+
+    const url = force ? `${apiUrl}?action=getInitData&nocache=1` : `${apiUrl}?action=getInitData`;
+    const res = await fetch(url);
+    const json = await res.json();
+
+    if (json.status !== 'success') throw new Error(json.message);
+
+    const serverVer = String(json.data.version || Date.now());
+    const localVer = localStorage.getItem('genapps_maestros_ver');
+
+    if (force || serverVer !== localVer) {
+      const { destinos, emisores } = this.parsearCatalogos(json.data.destinos);
+      
+      // Sobreescribe únicamente los stores de catálogo en IndexedDB (intacta la cola offline)
+      await IDBWrapper.put('maestros', { key: 'destinos', items: destinos });
+      await IDBWrapper.put('maestros', { key: 'emisores', items: emisores });
+      await IDBWrapper.put('maestros', { key: 'choferes', items: json.data.choferes });
+      await IDBWrapper.put('maestros', { key: 'vehiculos', items: json.data.vehiculos });
+      await IDBWrapper.put('maestros', { key: 'materiales', items: json.data.materiales });
+
+      localStorage.setItem('genapps_maestros_ver', serverVer);
+      return true; // Indica al DOM que debe re-renderizar los <select>
+    }
+    return false;
+  }
+};
+
     // ==========================================
     // 1. INICIALIZACIÓN DE INDEXEDDB
     // ==========================================
