@@ -1,6 +1,6 @@
 /**
- * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics v1.3.0)
- * @architecture Zero-Trust | Offline-First | Optimistic UI O(1) | Dual Print (A4 / 80mm)
+ * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics v1.3.1)
+ * @architecture Zero-Trust | Offline-First | Optimistic UI O(1) | Auto-Split Excedentes | Dual Print (A4 / 80mm)
  */
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-QJ6RZdmQw3gJIt80Y6f4iTKyS7BqhXrgHTGWrO0PiSj4m/exec";
@@ -305,8 +305,8 @@ window.forzarSincronizacionManual = async function (e) {
       return;
     }
 
-    // 3. Descarga directa con Cache-Buster garantizado (evita caché 302 de GAS)
-    const bust = `_t=${Date.now()}`;
+    // 3. Descarga directa con Cache-Buster y Bypass de caché servidor (nocache=1)
+    const bust = `_t=${Date.now()}&nocache=1`;
     const tokenParam = encodeURIComponent(API_SECRET_TOKEN);
 
     const [resCargos, resHistory] = await Promise.all([
@@ -362,7 +362,7 @@ window.forzarSincronizacionManual = async function (e) {
         const q = await SyncEngine.getQueueItems();
         pendingCount = Array.isArray(q) ? q.length : 0;
       }
-    } catch (_) {}
+    } catch (_) { }
 
     actualizarBadgeSync(pendingCount, navigator.onLine);
   }
@@ -638,7 +638,7 @@ const GenDialog = (() => {
         iconBox.className = 'w-11 h-11 rounded-xl flex items-center justify-center shrink-0 bg-amber-100 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30';
         iconBox.innerHTML = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>`;
         badgeEl.className = 'inline-block text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded mb-1 bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300';
-        btnConfirm.className = 'px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-all focus:outline-none';
+        btnConfirm.className = 'px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 shadow-lg shadow-amber-600/25 transition-all focus:outline-none';
       }
 
       badgeEl.textContent = badge;
@@ -667,7 +667,7 @@ const GenDialog = (() => {
       requestAnimationFrame(() => {
         modalEl.classList.remove('opacity-0');
         document.getElementById('gen-dialog-card').classList.remove('scale-95');
-        btnCancel.focus();
+        btnConfirm.focus();
       });
     });
   }
@@ -1460,7 +1460,7 @@ function renderizarTablaUI(cargos) {
 }
 
 // ==========================================
-// 10. MODAL DETALLE, AÑADIR ÍTEM EXTRA, EDITAR Y ELIMINAR
+// 10. MODAL DETALLE, EXCEDENTES AUTOMÁTICOS, AÑADIR, EDITAR Y ELIMINAR
 // ==========================================
 const FALLBACK_TRUCK_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 450'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%231e293b'/%3E%3Cstop offset='100%25' stop-color='%230f172a'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='800' height='450' fill='url(%23g)'/%3E%3Cg transform='translate(280,115)' fill='none' stroke='%2338bdf8' stroke-width='10' stroke-linecap='round' stroke-linejoin='round' opacity='0.35'%3E%3Crect x='10' y='30' width='140' height='100' rx='10'/%3E%3Cpath d='M150 65h45l30 35v30h-75z'/%3E%3Ccircle cx='55' cy='145' r='22'/%3E%3Ccircle cx='185' cy='145' r='22'/%3E%3C/g%3E%3C/svg%3E";
 
@@ -1491,9 +1491,93 @@ window.autocompletarDevolucionTotal = function () {
 
   inputs.forEach((input) => {
     const deuda = parseInt(input.getAttribute("data-deuda") || "0", 10);
-    if (deuda > 0) input.value = deuda;
+    if (deuda > 0) {
+      input.value = deuda;
+      input.dataset.splitAccepted = "false";
+    }
+  });
+  // Limpiar cualquier banner de excedente previo
+  document.querySelectorAll('[id^="excedente-alert-"]').forEach(el => {
+    el.classList.add("hidden");
+    el.innerHTML = "";
   });
   mostrarToast("Deuda completa autocompletada al 100%.");
+};
+
+// Motor en tiempo real para detectar excedentes en el input "Retorna" y proponer nueva fila
+window.evaluarExcedenteDetalle = function (idDetalle, rawValue) {
+  const siblings = document.querySelectorAll(`.mdl-return-input[data-id="${idDetalle}"]`);
+  if (siblings.length === 0) return;
+
+  const refInput = siblings[0];
+  const lleva = parseInt(refInput.getAttribute("data-lleva") || "0", 10);
+  const maxDeuda = parseInt(refInput.getAttribute("data-deuda") || "0", 10);
+  const materialName = refInput.getAttribute("data-material-name") || "Material";
+  const destinoName = refInput.getAttribute("data-destino-name") || "Destino";
+  const val = parseInt(String(rawValue || "").trim(), 10);
+
+  const boxDesktop = document.getElementById(`excedente-alert-desk-${idDetalle}`);
+  const boxMobile = document.getElementById(`excedente-alert-mob-${idDetalle}`);
+
+  if (!isNaN(val) && val > maxDeuda && lleva > 0) {
+    const diferencia = val - maxDeuda;
+    const isAccepted = refInput.dataset.splitAccepted === "true";
+
+    const bannerHTML = isAccepted
+      ? `
+        <div class="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700/70 text-xs text-emerald-900 dark:text-emerald-200 flex flex-wrap items-center justify-between gap-2 shadow-sm">
+          <div class="flex items-center gap-2">
+            <span class="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[11px] font-black shrink-0">✓</span>
+            <span>
+              <strong>Desdoblamiento activo:</strong> Se liquidan <b>${maxDeuda} und.</b> exactas en esta línea y se creará una fila nueva con <b>+${diferencia} und.</b> (${materialName} → ${destinoName}).
+            </span>
+          </div>
+          <button type="button" onclick="toggleAceptarExcedente('${idDetalle}', false)"
+            class="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white dark:bg-gray-900 border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 shrink-0 transition-colors">
+            Deshacer
+          </button>
+        </div>
+      `
+      : `
+        <div class="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-600/60 text-xs text-amber-950 dark:text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
+          <div class="leading-snug">
+            <span class="font-black text-amber-700 dark:text-amber-400">⚠️ Excedente de +${diferencia} und. (Deuda: ${maxDeuda}):</span>
+            ¿Dejar esta línea exacta en <b>${lleva}</b> y registrar <b>+${diferencia}</b> en una fila nueva de devolución (<b>${materialName}</b> • ${destinoName})?
+          </div>
+          <button type="button" onclick="toggleAceptarExcedente('${idDetalle}', true)"
+            class="px-3 py-1.5 text-xs font-extrabold rounded-xl bg-amber-600 hover:bg-amber-500 text-white shadow-md shrink-0 transition-all active:scale-95">
+            Sí, crear fila (+${diferencia})
+          </button>
+        </div>
+      `;
+
+    if (boxDesktop) {
+      boxDesktop.classList.remove("hidden");
+      boxDesktop.innerHTML = bannerHTML;
+    }
+    if (boxMobile) {
+      boxMobile.classList.remove("hidden");
+      boxMobile.innerHTML = bannerHTML;
+    }
+  } else {
+    siblings.forEach(inp => { inp.dataset.splitAccepted = "false"; });
+    if (boxDesktop) { boxDesktop.classList.add("hidden"); boxDesktop.innerHTML = ""; }
+    if (boxMobile) { boxMobile.classList.add("hidden"); boxMobile.innerHTML = ""; }
+  }
+};
+
+window.toggleAceptarExcedente = function (idDetalle, aceptar) {
+  const siblings = document.querySelectorAll(`.mdl-return-input[data-id="${idDetalle}"]`);
+  if (siblings.length === 0) return;
+
+  siblings.forEach(inp => {
+    inp.dataset.splitAccepted = aceptar ? "true" : "false";
+  });
+
+  evaluarExcedenteDetalle(idDetalle, siblings[0].value);
+  if (aceptar) {
+    mostrarToast("Excedente programado en nueva fila de devolución.");
+  }
 };
 
 // 10.1 AÑADIR MATERIAL NO LISTADO A UN CARGO EXISTENTE (OPTIMISTIC UI)
@@ -1905,6 +1989,8 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
   // 1. Renderizado Tabla Escritorio (Desktop)
   const tablaHTML = detallesProcesados.map((det) => {
     const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, '"');
+    const safeMatAttr = det.nombreMaterial.replace(/"/g, '"');
+    const safeDestAttr = det.nombreDestino.replace(/"/g, '"');
     const puedeEditarFila = AuthRules.canModifyLinea(cargo, det);
 
     const botonesAccionDesktop = puedeEditarFila ? `
@@ -1945,9 +2031,21 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
           </div>
         </td>
         <td class="px-4 py-3.5 w-32">
-          <input type="number" min="0" max="${Math.max(0, det.deuda)}" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "0"}" 
+          <input type="number" min="0" inputmode="numeric"
+                 data-id="${det.ID_DETALLE}"
+                 data-lleva="${det.lleva}"
+                 data-deuda="${det.deuda}"
+                 data-material-name="${safeMatAttr}"
+                 data-destino-name="${safeDestAttr}"
+                 data-split-accepted="false"
+                 placeholder="${det.deuda <= 0 ? "-" : "0"}" 
                  class="w-full bg-white dark:bg-gray-950 border-2 border-gray-300 dark:border-gray-700 rounded-xl p-2 text-center text-base text-emerald-600 dark:text-emerald-400 font-black focus:border-emerald-500 outline-none mdl-return-input mdl-input-desktop transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-800 disabled:opacity-50"
                  ${det.deuda <= 0 ? "disabled" : ""}>
+        </td>
+      </tr>
+      <tr class="border-0">
+        <td colspan="4" class="p-0">
+          <div id="excedente-alert-desk-${det.ID_DETALLE}" class="hidden px-4 pb-3"></div>
         </td>
       </tr>
     `;
@@ -1957,6 +2055,8 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
   // 2. Renderizado Tarjetas Táctiles (Móvil)
   const cardsMobileHTML = detallesProcesados.map((det) => {
     const safeName = det.nombreMaterial.replace(/'/g, "\\'").replace(/"/g, '"');
+    const safeMatAttr = det.nombreMaterial.replace(/"/g, '"');
+    const safeDestAttr = det.nombreDestino.replace(/"/g, '"');
     const puedeEditarFila = AuthRules.canModifyLinea(cargo, det);
 
     const botonesAccionMobile = puedeEditarFila ? `
@@ -1989,22 +2089,32 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
             <div><span class="text-[9px] text-gray-500 block uppercase">Deuda</span><strong class="${det.deuda > 0 ? "text-red-600 dark:text-red-400" : det.deuda < 0 ? "text-amber-600" : "text-gray-500"} text-sm">${det.deuda}</strong></div>
           </div>
           <div class="w-24 shrink-0">
-            <input type="number" min="0" max="${Math.max(0, det.deuda)}" inputmode="numeric" data-id="${det.ID_DETALLE}" data-deuda="${det.deuda}" placeholder="${det.deuda <= 0 ? "-" : "Retorna"}"
+            <input type="number" min="0" inputmode="numeric"
+                   data-id="${det.ID_DETALLE}"
+                   data-lleva="${det.lleva}"
+                   data-deuda="${det.deuda}"
+                   data-material-name="${safeMatAttr}"
+                   data-destino-name="${safeDestAttr}"
+                   data-split-accepted="false"
+                   placeholder="${det.deuda <= 0 ? "-" : "Retorna"}"
                    class="w-full bg-white dark:bg-gray-950 border-2 border-gray-300 dark:border-gray-600 rounded-xl p-2 text-center text-base text-emerald-600 dark:text-emerald-400 font-black focus:border-emerald-500 outline-none mdl-return-input mdl-input-mobile disabled:opacity-50"
                    ${det.deuda <= 0 ? "disabled" : ""}>
           </div>
         </div>
+        <div id="excedente-alert-mob-${det.ID_DETALLE}" class="hidden mt-2"></div>
       </div>
     `;
   }).join("");
   document.getElementById("mdlCardsMaterialesMobile").innerHTML = cardsMobileHTML;
 
+  // Sincronización bidireccional Desktop <-> Mobile + Evaluación de Excedentes en vivo
   document.querySelectorAll(".mdl-return-input").forEach(inp => {
     inp.addEventListener("input", (e) => {
       const id = e.target.getAttribute("data-id");
       document.querySelectorAll(`.mdl-return-input[data-id="${id}"]`).forEach(sibling => {
         if (sibling !== e.target) sibling.value = e.target.value;
       });
+      evaluarExcedenteDetalle(id, e.target.value);
     });
   });
 
@@ -2069,66 +2179,173 @@ async function procesarLiquidacionModal(idCargo) {
 
   const inputs = document.querySelectorAll(".mdl-input-desktop:not([disabled])");
   const payloadDevolucion = [];
+  const excedentesSinAceptar = [];
   let errorValidacion = null;
 
   inputs.forEach((input) => {
     const rawVal = input.value.trim();
     if (!rawVal) return;
 
+    const idDet = input.getAttribute("data-id");
     const qty = parseInt(rawVal, 10);
     const maxDeuda = parseInt(input.getAttribute("data-deuda") || "0", 10);
+    const splitAccepted = input.dataset.splitAccepted === "true";
 
     if (isNaN(qty) || qty < 0) {
       errorValidacion = "No se permiten cantidades negativas o inválidas.";
       return;
     }
-    if (qty > maxDeuda) {
-      errorValidacion = `La cantidad a retornar (${qty}) supera la deuda pendiente (${maxDeuda}).`;
-      return;
+
+    if (qty > maxDeuda && !splitAccepted) {
+      excedentesSinAceptar.push({
+        idDetalle: idDet,
+        material: input.getAttribute("data-material-name") || "Material",
+        destino: input.getAttribute("data-destino-name") || "Destino",
+        deuda: maxDeuda,
+        excedente: qty - maxDeuda
+      });
     }
+
     if (qty > 0) {
-      payloadDevolucion.push({ id_detalle: input.getAttribute("data-id"), qty: qty });
+      payloadDevolucion.push({
+        id_detalle: idDet,
+        qty: qty,
+        splitExcedente: qty > maxDeuda ? splitAccepted : false
+      });
     }
   });
 
   if (errorValidacion) {
-    return mostrarAlerta(errorValidacion, "error", "Cantidad Excedida");
+    return mostrarAlerta(errorValidacion, "error", "Cantidad Inválida");
   }
 
   if (payloadDevolucion.length === 0) {
     return mostrarAlerta("Ingresa al menos una cantidad mayor a 0 en la columna 'Retorna'.", "warning", "Datos Insuficientes");
   }
 
+  // Si hay excedentes digitados sin confirmar en el banner inline, solicitar confirmación fluida con GenDialog
+  if (excedentesSinAceptar.length > 0) {
+    const resumenHtml = excedentesSinAceptar
+      .map(e => `• <strong>${e.material}</strong> (${e.destino}): deuda <b>${e.deuda}</b> + fila nueva <b>+${e.excedente}</b>`)
+      .join("<br>");
+
+    const aceptarDesdoblamiento = await GenDialog.confirm({
+      badge: "Excedente Detectado",
+      title: "¿Generar fila nueva por la diferencia?",
+      message: `Se detectaron retornos mayores a la deuda. Al aceptar, la fila original quedará exacta y la diferencia se registrará en una nueva fila:<br><br>${resumenHtml}`,
+      confirmText: "Sí, desdoblar y guardar",
+      variant: "warning"
+    });
+
+    if (!aceptarDesdoblamiento) return;
+
+    // Marcar splitExcedente = true en los ítems confirmados
+    const setIds = new Set(excedentesSinAceptar.map(e => e.idDetalle));
+    payloadDevolucion.forEach(item => {
+      if (setIds.has(item.id_detalle)) item.splitExcedente = true;
+    });
+  }
+
+  // Actualización Optimista en Memoria e IndexedDB ($O(1)$)
+  const ahora = new Date();
+  const fechaFormat = `${ahora.getDate().toString().padStart(2, '0')}/${(ahora.getMonth() + 1).toString().padStart(2, '0')}/${ahora.getFullYear()} ${ahora.getHours().toString().padStart(2, '0')}:${ahora.getMinutes().toString().padStart(2, '0')}:${ahora.getSeconds().toString().padStart(2, '0')}`;
+  const gestorNombre = AppState.user ? AppState.user.nombre : 'Usuario Desconocido';
+
   const cargoIndex = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
+  let totalFilasExcedenteCreadas = 0;
+
   if (cargoIndex !== -1) {
     const cargo = AppState.cargosActivos[cargoIndex];
     let tieneSaldoPendiente = false;
+    const nuevasFilasOptimistasCargo = [];
 
     cargo.detalles.forEach(det => {
       const mov = payloadDevolucion.find(p => p.id_detalle === det.ID_DETALLE);
       if (mov) {
-        det.DEVUELVE = parseInt(det.DEVUELVE || 0, 10) + mov.qty;
-        det.DEUDA = parseInt(det.LLEVA || 0, 10) - det.DEVUELVE;
+        const lleva = parseInt(det.LLEVA || 0, 10);
+        const devPrevio = parseInt(det.DEVUELVE || 0, 10);
+        const deudaPend = Math.max(0, lleva - devPrevio);
+
+        if (mov.splitExcedente && mov.qty > deudaPend && lleva > 0) {
+          const excedenteQty = mov.qty - deudaPend;
+          det.DEVUELVE = lleva;
+          det.DEUDA = 0;
+          totalFilasExcedenteCreadas++;
+
+          const tempExcId = `LOC-EXC-${Date.now().toString(36).toUpperCase()}-${totalFilasExcedenteCreadas}`;
+          nuevasFilasOptimistasCargo.push({
+            ID_DETALLE: tempExcId,
+            LLEVA: 0,
+            DEVUELVE: excedenteQty,
+            DEUDA: -excedenteQty,
+            DESTINO: det.DESTINO,
+            MATERIAL: det.MATERIAL,
+            EMISOR: det.EMISOR,
+            RESPONSABLE: det.RESPONSABLE || cargo.choferId
+          });
+
+          AppState.historial.unshift({
+            idCargo: cargo.idCargo,
+            idDetalle: tempExcId,
+            material: det.MATERIAL,
+            destino: det.DESTINO,
+            emisor: det.EMISOR || 'Almacén PT',
+            lleva: 0,
+            devuelve: excedenteQty,
+            deuda: -excedenteQty,
+            estado: 'Excedente',
+            horaCargo: cargo.hora || fechaFormat,
+            gestorCargo: cargo.gestor || gestorNombre,
+            horaDescargo: fechaFormat,
+            gestorDescargo: gestorNombre,
+            chofer: cargo.choferId || '',
+            placa: cargo.placa || 'S/N'
+          });
+        } else {
+          det.DEVUELVE = devPrevio + mov.qty;
+          det.DEUDA = lleva - det.DEVUELVE;
+        }
+
+        // Sincronizar fila original en AppState.historial
+        const histOrig = AppState.historial.find(h => h.idDetalle === det.ID_DETALLE);
+        if (histOrig) {
+          histOrig.devuelve = det.DEVUELVE;
+          histOrig.deuda = det.DEUDA;
+          histOrig.estado = det.DEUDA > 0 ? 'Pendiente' : (det.DEUDA < 0 ? 'Excedente' : 'Devolución completa');
+          histOrig.horaDescargo = fechaFormat;
+          histOrig.gestorDescargo = gestorNombre;
+        }
       }
+
       if (parseInt(det.DEUDA || 0, 10) !== 0) tieneSaldoPendiente = true;
     });
+
+    if (nuevasFilasOptimistasCargo.length > 0) {
+      cargo.detalles.push(...nuevasFilasOptimistasCargo);
+      tieneSaldoPendiente = true; // El saldo a favor (-excedente) mantiene el viaje visible hasta auditoría
+    }
 
     if (!tieneSaldoPendiente) {
       AppState.cargosActivos.splice(cargoIndex, 1);
     }
 
     await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
+    await SyncEngine.saveCache('historial', AppState.historial);
   }
 
   await SyncEngine.enqueueMutation('updateDevolucion', {
     data: payloadDevolucion,
-    gestorNombre: AppState.user ? AppState.user.nombre : 'Usuario Desconocido',
+    gestorNombre,
     gestorRol: AuthRules.currentUserRole()
   });
 
   cerrarDetalle();
   renderizarCargosFiltrados();
-  mostrarToast(`Liquidación del cargo ${idCargo} guardada. Sincronizando...`);
+  if (totalFilasExcedenteCreadas > 0) {
+    mostrarToast(`Cargo ${idCargo} liquidado + ${totalFilasExcedenteCreadas} fila(s) de excedente creada(s).`);
+  } else {
+    mostrarToast(`Liquidación del cargo ${idCargo} guardada. Sincronizando...`);
+  }
 
   if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
 }
