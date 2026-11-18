@@ -2751,7 +2751,7 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
       <tr style="border-bottom: 1px dashed #9ca3af;">
         <td style="padding: 4px 2px; vertical-align: top;">
           <div style="font-weight: 700; font-size: 12px; line-height: 1.2;">${item.nombreMaterial}</div>
-          <div style="font-size: 14px; color: #374151;"> ${item.nombreDestino}</div>
+          <div style="font-size: 14px; "> ${item.nombreDestino}</div>
         </td>
         <td style="padding: 4px 2px; text-align: right; vertical-align: top; font-weight: 900; font-size: 12px; font-family: monospace;">
           ${item.lleva}
