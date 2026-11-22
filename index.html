@@ -43,7 +43,7 @@
 
   <main class="min-h-screen flex flex-col items-center p-4 md:p-8">
 
-    <!-- HEADER CORPORATIVO + MOTOR DE SINCRONIZACIÓN -->
+    <!-- HEADER CORPORATIVO + BOTÓN ÚNICO DE SINCRONIZACIÓN GLOBAL -->
     <header class="w-full max-w-6xl mb-6 md:mb-8 flex flex-col lg:flex-row justify-between items-center gap-4">
       <div class="flex items-center justify-between w-full lg:w-auto">
         <h1
@@ -52,13 +52,14 @@
           GenLogistics <span class="text-gray-500 dark:text-gray-400 font-light text-lg md:text-xl">| Embalajes</span>
         </h1>
 
-        <!-- Botón Sync Móvil Compacto -->
-        <button type="button" id="btnSyncMobile"
-          onclick="SyncEngine.processQueue().then(() => SyncEngine.pullLatestState(true).catch(() => {}))"
-          title="Estado de sincronización (clic para actualizar)"
-          class="lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20">
-          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-          <span>Al día</span>
+        <!-- Botón Único Sync Móvil -->
+        <button type="button" id="btnSyncGlobalMobile" onclick="forzarSincronizacionManual(event)"
+          title="Sincronizar datos con Google Sheets"
+          class="lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20 active:scale-95">
+          <svg id="syncIconMobile" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+          </svg>
+          <span id="syncTextMobile">Sincronizado</span>
         </button>
       </div>
 
@@ -74,16 +75,15 @@
           class="flex-1 lg:flex-none px-4 md:px-5 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-xs md:text-sm font-bold transition-all">Histórico</button>
       </nav>
 
-      <!-- INDICADORES DE SESIÓN Y COLA OFFLINE -->
+      <!-- INDICADORES DE SESIÓN Y BOTÓN ÚNICO DE SINCRONIZACIÓN DESKTOP -->
       <div class="hidden lg:flex items-center gap-2.5">
-        <button type="button" id="sync-badge"
-          onclick="SyncEngine.processQueue().then(() => SyncEngine.pullLatestState(true).catch(() => {}))"
-          title="Clic para forzar sincronización"
-          class="flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 hover:opacity-80">
-          <svg id="sync-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <button type="button" id="btnSyncGlobalDesktop" onclick="forzarSincronizacionManual(event)"
+          title="Clic para sincronizar datos con Google Sheets"
+          class="hidden lg:flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 hover:opacity-80 active:scale-95">
+          <svg id="syncIconDesktop" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
           </svg>
-          <span id="sync-text">Sincronizado</span>
+          <span id="syncTextDesktop">Sincronizado</span>
         </button>
 
         <div id="status-indicator"
@@ -255,7 +255,7 @@
           <label class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer select-none">
             <input type="checkbox" id="chkAutoPrint"
               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4">
-            Abrir ticket de impresión al guardar
+            Imprimir ticket 80mm al guardar
           </label>
 
           <button type="button" id="btnSubmit"
@@ -286,7 +286,7 @@
         </h2>
 
         <div class="flex flex-col lg:flex-row items-center gap-2 w-full xl:w-auto">
-          <!-- Rango de fechas sincronizado con script.js (inDesdeActivos / inHastaActivos) -->
+          <!-- Rango de fechas sincronizado con script.js -->
           <div
             class="flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 w-full lg:w-auto">
             <span class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Desde</span>
@@ -316,15 +316,6 @@
                   d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
               </svg>
             </div>
-
-            <button type="button" id="btnRefreshCargos" title="Sincronizar ahora"
-              class="p-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-300 transition-colors flex justify-center items-center shrink-0">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                </path>
-              </svg>
-            </button>
           </div>
         </div>
       </div>
@@ -389,15 +380,6 @@
               </svg>
               <span>Exportar Excel</span>
             </button>
-
-            <button type="button" id="btnRefreshHistorico" title="Sincronizar ahora"
-              class="p-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-300 transition-colors flex justify-center items-center">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15">
-                </path>
-              </svg>
-            </button>
           </div>
 
         </div>
@@ -430,7 +412,7 @@
         class="bg-white dark:bg-gray-900 border-t sm:border border-gray-200 dark:border-gray-700 shadow-2xl rounded-t-3xl sm:rounded-2xl w-full max-w-[96vw] xl:max-w-7xl h-[94vh] sm:h-auto sm:max-h-[92vh] flex flex-col overflow-hidden transform scale-95 transition-transform duration-300"
         id="modalDetalleContent">
 
-        <!-- CABECERA DEL MODAL -->
+        <!-- CABECERA DEL MODAL CON 2 BOTONES DIRECTOS DE IMPRESIÓN -->
         <div
           class="flex justify-between items-center px-5 py-3.5 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/90 shrink-0">
           <div class="flex items-center gap-3">
@@ -440,15 +422,28 @@
             </h3>
           </div>
           <div class="flex items-center gap-2">
-            <button type="button" id="btnPrintModal" title="Imprimir / Descargar PDF"
-              class="px-3 py-2 text-xs font-bold text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm">
+            <!-- Botón Impresión Directa Ticket 80mm -->
+            <button type="button" id="btnPrintTicketModal" title="Imprimir Ticket Térmico 80mm"
+              class="px-3 py-2 text-xs font-bold text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-white bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl transition-all active:scale-95 flex items-center gap-1.5 shadow-sm">
+              <svg class="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z">
+                </path>
+              </svg>
+              <span>Ticket 80mm</span>
+            </button>
+
+            <!-- Botón Impresión Directa Hoja A4 -->
+            <button type="button" id="btnPrintA4Modal" title="Imprimir Guía en Hoja A4"
+              class="px-3 py-2 text-xs font-bold text-blue-700 dark:text-blue-300 hover:text-white bg-blue-50 hover:bg-blue-600 dark:bg-blue-500/15 dark:hover:bg-blue-600 border border-blue-200 dark:border-blue-500/30 rounded-xl transition-all active:scale-95 flex items-center gap-1.5 shadow-sm">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z">
                 </path>
               </svg>
-              <span class="hidden sm:inline">Ticket</span>
+              <span>Guía A4</span>
             </button>
+
             <button type="button" onclick="cerrarDetalle()"
               class="p-2 text-red-500 dark:text-red-400 hover:text-white hover:bg-red-500 rounded-xl transition-colors">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
