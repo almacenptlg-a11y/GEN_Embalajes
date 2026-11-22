@@ -1,8 +1,7 @@
 /**
  * @fileoverview Motor de Sincronización Offline-First (IndexedDB + Outbox Queue + Edge Compression)
  * @module SyncEngine
- * @version 1.4.0
- * @architecture Zero-Latency Optimistic UI | Anti-Deadlock FIFO | Race-Condition Guard
+ * @architecture Zero-Latency Optimistic UI & Background Worker
  */
 
 const SyncEngine = (() => {
@@ -10,18 +9,16 @@ const SyncEngine = (() => {
     const DB_VERSION = 1;
     const STORE_CACHE = 'cache_datos';
     const STORE_QUEUE = 'sync_queue';
-    const MAX_LOGIC_RETRIES = 2; // Evita bloqueo FIFO por errores persistentes
 
     let db = null;
     let isSyncing = false;
-    let syncStartedAt = 0;
     let pollingInterval = null;
     let config = {
         apiUrl: '',
         token: '',
-        onQueueChange: () => { },      // Callback para actualizar badge en UI
-        onRemoteDataSync: () => { },   // Callback cuando llegan datos frescos en segundo plano
-        onSyncError: () => { }         // Callback de notificación de rechazo
+        onQueueChange: () => {},      // Callback para actualizar badge en UI
+        onRemoteDataSync: () => {},   // Callback cuando llegan datos frescos en segundo plano
+        onSyncError: () => {}         // Callback silencioso o de log
     };
 
     // ==========================================
@@ -86,10 +83,7 @@ const SyncEngine = (() => {
     // 3. GESTIÓN DE COLA OUTBOX (FIFO)
     // ==========================================
     function generateUUID() {
-        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-            return crypto.randomUUID();
-        }
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
             const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
             return v.toString(16);
         });
@@ -99,7 +93,7 @@ const SyncEngine = (() => {
         return new Promise((resolve, reject) => {
             const tx = db.transaction(STORE_QUEUE, 'readwrite');
             const store = tx.objectStore(STORE_QUEUE);
-
+            
             const item = {
                 uuid: generateUUID(),
                 action: action,
@@ -132,17 +126,6 @@ const SyncEngine = (() => {
         });
     }
 
-    function updateQueueItem(item) {
-        return new Promise((resolve, reject) => {
-            const tx = db.transaction(STORE_QUEUE, 'readwrite');
-            const store = tx.objectStore(STORE_QUEUE);
-            const request = store.put(item);
-
-            request.onsuccess = () => resolve(true);
-            request.onerror = (e) => reject(e.target.error);
-        });
-    }
-
     function removeQueueItem(id) {
         return new Promise((resolve, reject) => {
             const tx = db.transaction(STORE_QUEUE, 'readwrite');
@@ -160,12 +143,15 @@ const SyncEngine = (() => {
     }
 
     // ==========================================
-    // 4. WORKER DE SINCRONIZACIÓN (PUSH & PULL BLINDADO)
+    // 4. WORKER DE SINCRONIZACIÓN (PUSH & PULL)
     // ==========================================
+   
+let syncStartedAt = 0; // Watchdog anti-deadlock
+
     async function processQueue() {
-        // Watchdog anti-deadlock (>25s activo)
-        if (isSyncing && (Date.now() - syncStartedAt > 25000)) {
-            console.warn('[SyncEngine] Liberando lock de sincronización por timeout (>25s).');
+        // Si isSyncing lleva más de 20s activo, liberar el lock por timeout de red
+        if (isSyncing && (Date.now() - syncStartedAt > 20000)) {
+            console.warn('[SyncEngine] Liberando lock de sincronización por timeout (>20s).');
             isSyncing = false;
         }
 
@@ -183,8 +169,6 @@ const SyncEngine = (() => {
         isSyncing = true;
         syncStartedAt = Date.now();
         await notifyQueueStatus();
-
-        let pushedCount = 0;
 
         for (const item of queue) {
             if (!navigator.onLine) break;
@@ -209,28 +193,15 @@ const SyncEngine = (() => {
 
                 if (result.status === 'success') {
                     await removeQueueItem(item.id);
-                    pushedCount++;
                     await notifyQueueStatus();
                 } else {
-                    // Rechazo lógico del servidor (ej. permiso denegado, cargo ya eliminado, validación)
                     console.error(`[SyncEngine] Rechazo del servidor en ${item.action}:`, result.message);
-                    item.retries = (item.retries || 0) + 1;
-
-                    if (result.fatal || item.retries >= MAX_LOGIC_RETRIES) {
-                        // Purgar "Poison Pill" para que no congele el resto de la cola FIFO
-                        await removeQueueItem(item.id);
-                        config.onSyncError(`${result.message} (Transacción descartada tras rechazo)`, item);
-                        await notifyQueueStatus();
-                        // Continuar con el siguiente ítem de la cola
-                    } else {
-                        await updateQueueItem(item);
-                        config.onSyncError(result.message, item);
-                        break;
-                    }
+                    config.onSyncError(result.message, item);
+                    if (result.fatal) await removeQueueItem(item.id);
+                    break;
                 }
             } catch (networkErr) {
-                // Fallo físico de red: conservar ítem intacto y abortar ciclo hasta reconexión
-                console.warn('[SyncEngine] Microcorte de red durante Push:', networkErr.message);
+                console.warn('[SyncEngine] Microcorte de red durante Push:', networkErr);
                 break;
             }
         }
@@ -239,39 +210,38 @@ const SyncEngine = (() => {
         syncStartedAt = 0;
         await notifyQueueStatus();
 
-        // Si la cola quedó limpia, descargar estado consolidado (con nocache si acabamos de subir cambios)
         const remaining = await getQueueItems();
         if (remaining.length === 0 && navigator.onLine) {
-            await pullLatestState(pushedCount > 0);
+            await pullLatestState(false);
         }
     }
 
     async function pullLatestState(force = false) {
         if (!navigator.onLine) {
-            if (force) throw new Error('Sin conexión a internet.');
+            if (force) throw new Error("Sin conexión a internet.");
             return false;
         }
 
+        // Si NO es forzado, respetar locks y cola pendiente
         if (!force) {
             const pending = await getQueueItems();
             if (pending.length > 0 || isSyncing) return false;
         } else {
-            // En sincronización manual forzada, drenar cola local primero
+            // Si ES forzado por clic del usuario, intentar vaciar cola primero
             const pending = await getQueueItems();
             if (pending.length > 0) {
                 await processQueue();
                 const stillPending = await getQueueItems();
                 if (stillPending.length > 0) {
-                    throw new Error(`Aún hay ${stillPending.length} registro(s) pendiente(s) por subir.`);
+                    throw new Error(`Hay ${stillPending.length} registro(s) local(es) sin poder subirse. Revisa tu conexión.`);
                 }
             }
         }
 
         try {
+            const bust = `_t=${Date.now()}`;
             const tokenParam = encodeURIComponent(config.token);
             const noCacheParam = force ? '&nocache=1' : '';
-            const bust = `_t=${Date.now()}${noCacheParam}`;
-
             const [resCargos, resHistory] = await Promise.all([
                 fetch(`${config.apiUrl}?action=getActiveCargos&token=${tokenParam}&${bust}`, {
                     method: 'GET',
@@ -286,7 +256,7 @@ const SyncEngine = (() => {
             ]);
 
             if (!resCargos.ok || !resHistory.ok) {
-                throw new Error(`Error HTTP (${resCargos.status} / ${resHistory.status})`);
+                throw new Error(`HTTP Error (${resCargos.status} / ${resHistory.status})`);
             }
 
             const jsonCargos = await resCargos.json();
@@ -294,14 +264,6 @@ const SyncEngine = (() => {
 
             if (jsonCargos.status === 'error') throw new Error(jsonCargos.message);
             if (jsonHistory.status === 'error') throw new Error(jsonHistory.message);
-
-            // RACE CONDITION GUARD: Verificar que el usuario no haya creado una mutación local
-            // mientras los GET estaban en tránsito
-            const pendingAfterFetch = await getQueueItems();
-            if (pendingAfterFetch.length > 0) {
-                console.info('[SyncEngine] Pull descartado: existen nuevas mutaciones locales en cola.');
-                return false;
-            }
 
             if (jsonCargos.status === 'success' && Array.isArray(jsonCargos.data)) {
                 await saveCache('cargosActivos', jsonCargos.data);
@@ -322,7 +284,6 @@ const SyncEngine = (() => {
             return false;
         }
     }
-
     // ==========================================
     // 5. COMPRESIÓN EDGE PARA FIRMAS (CANVAS)
     // ==========================================
@@ -351,6 +312,7 @@ const SyncEngine = (() => {
 
         if (!hasPixels) return null;
 
+        // Añadir margen de seguridad de 10px
         const pad = 10;
         minX = Math.max(0, minX - pad);
         minY = Math.max(0, minY - pad);
@@ -360,16 +322,18 @@ const SyncEngine = (() => {
         const cropW = maxX - minX;
         const cropH = maxY - minY;
 
+        // Escalar a máximo 400px de ancho manteniendo proporción
         const maxWidth = 400;
         const scale = cropW > maxWidth ? maxWidth / cropW : 1;
 
         const offscreen = document.createElement('canvas');
-        offscreen.width = Math.round(cropW * scale);
-        offscreen.height = Math.round(cropH * scale);
+        offscreen.width = cropW * scale;
+        offscreen.height = cropH * scale;
 
         const offCtx = offscreen.getContext('2d');
         offCtx.drawImage(sourceCanvas, minX, minY, cropW, cropH, 0, 0, offscreen.width, offscreen.height);
 
+        // Retorna PNG recortado (peso típico: ~4KB - 8KB frente a los ~60KB originales)
         return offscreen.toDataURL('image/png');
     }
 
@@ -380,6 +344,7 @@ const SyncEngine = (() => {
         config = { ...config, ...userConfig };
         await initDB();
 
+        // Listeners nativos de conectividad
         window.addEventListener('online', () => {
             console.info('[SyncEngine] Conexión restaurada. Ejecutando sincronización...');
             processQueue();
@@ -390,18 +355,19 @@ const SyncEngine = (() => {
             notifyQueueStatus();
         });
 
-        // Heartbeat Polling cada 30 segundos (solo envía datos si cola > 0)
+        // Heartbeat Polling cada 30 segundos
         if (pollingInterval) clearInterval(pollingInterval);
         pollingInterval = setInterval(() => {
             if (!navigator.onLine) return;
             getQueueItems().then(items => {
                 if (items.length > 0) processQueue();
-                else pullLatestState(false);
+                else pullLatestState();
             });
         }, 30000);
 
         await notifyQueueStatus();
-
+        
+        // Intentar vaciar cola residual al arrancar
         if (navigator.onLine) processQueue();
     }
 
