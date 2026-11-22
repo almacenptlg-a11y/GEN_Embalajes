@@ -3,7 +3,7 @@
  * @architecture Stale-While-Revalidate para App Shell | Network-Only para API GAS
  */
 
-const CACHE_VERSION = 'genlogistics-embalajes-v1.4.0';
+const CACHE_VERSION = 'genlogistics-embalajes-v1.4.1';
 const MEDIA_CACHE = 'genlogistics-media-v1';
 
 // Recursos estáticos críticos que forman el App Shell (100% Zero-CDN)
