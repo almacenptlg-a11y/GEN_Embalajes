@@ -2684,7 +2684,6 @@ function renderizarHistorico() {
     return;
   }
 
-  // Mapa rápido de IDs aún activos para distinguir "Pendiente en ruta" vs "Cerrado con Faltante"
   const idsActivosSet = new Set(AppState.cargosActivos.map(c => c.idCargo));
 
   let html = `
@@ -2701,7 +2700,6 @@ function renderizarHistorico() {
             <th class="px-3 py-3 text-center border-r border-gray-200 dark:border-gray-800/50 text-emerald-600 dark:text-emerald-400 cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors" onclick="setHistorySort('devuelve')">Devuelto ${getHistorySortIcon('devuelve')}</th>
             <th class="px-3 py-3 text-center border-r border-gray-200 dark:border-gray-800/50 text-pink-600 dark:text-pink-400 cursor-pointer hover:text-pink-700 dark:hover:text-pink-300 transition-colors" onclick="setHistorySort('deuda')">Deuda ${getHistorySortIcon('deuda')}</th>
             <th class="px-4 py-3 text-center">Estado / Nota</th>
-            <th class="px-3 py-3 text-center">Imprimir</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200 dark:divide-gray-800/60">
@@ -2726,7 +2724,7 @@ function renderizarHistorico() {
     }
 
     html += `
-      <tr onclick="abrirDetalle('${safeCargoId}', '${escapeHTML(row.material)}')" title="Clic para abrir el cargo y gestionar liquidación" class="hover:bg-blue-50/40 dark:hover:bg-gray-800/70 transition-colors group cursor-pointer">
+      <tr onclick="abrirDetalle('${safeCargoId}', '${escapeHTML(row.material)}')" title="Clic para abrir el cargo, gestionar liquidación o imprimir" class="hover:bg-blue-50/40 dark:hover:bg-gray-800/70 transition-colors group cursor-pointer">
         <td class="px-4 py-3.5 font-mono text-gray-500 dark:text-gray-400 text-[11px] hover:bg-blue-100/60 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-300 transition-colors celda-trazabilidad border-l-2 border-transparent hover:border-blue-500" onclick="event.stopPropagation(); abrirTrazabilidad(event, '${escapeHTML(row.idDetalle)}')">
           <div class="flex items-center gap-1.5" title="Click para ver auditoría">
             <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -2741,18 +2739,6 @@ function renderizarHistorico() {
         <td class="px-3 py-3.5 text-center text-emerald-600 dark:text-emerald-400 font-black bg-emerald-50 dark:bg-emerald-900/10">${row.devuelve}</td>
         <td class="px-3 py-3.5 text-center ${deuda > 0 ? 'text-pink-600 dark:text-pink-400 bg-pink-50 dark:bg-pink-900/10' : 'text-gray-500'} font-black">${deuda}</td>
         <td class="px-4 py-3.5 text-center">${badgeEstadoHTML}</td>
-        <td class="px-3 py-3.5 text-center" onclick="event.stopPropagation()">
-          <div class="inline-flex items-center gap-1">
-            <button type="button" onclick="generarDocumentoImpresion('${safeCargoId}', 'TICKET')" title="Imprimir Ticket 80mm"
-              class="px-2 py-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded text-[10px] font-bold">
-              Ticket
-            </button>
-            <button type="button" onclick="generarDocumentoImpresion('${safeCargoId}', 'A4')" title="Imprimir A4"
-              class="px-2 py-1 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white dark:bg-blue-500/15 dark:hover:bg-blue-600 dark:text-blue-300 dark:hover:text-white border border-blue-200 dark:border-blue-500/30 rounded text-[10px] font-bold">
-              A4
-            </button>
-          </div>
-        </td>
       </tr>
     `;
   });
