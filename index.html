@@ -4,7 +4,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>GenLogistics | Sistema de Embalajes</title>
+
+  <!-- Manifiesto PWA para instalación nativa en planta y ruta -->
+  <link rel="manifest" href="manifest.json">
 
   <!-- CSS Pre-compilado (Zero-CDN para soporte 100% Offline en Planta) -->
   <link rel="stylesheet" href="styles.css">
@@ -47,7 +53,9 @@
         </h1>
 
         <!-- Botón Sync Móvil Compacto -->
-        <button type="button" id="btnSyncMobile" onclick="SyncEngine.processQueue()" title="Estado de sincronización"
+        <button type="button" id="btnSyncMobile"
+          onclick="SyncEngine.processQueue().then(() => SyncEngine.pullLatestState(true).catch(() => {}))"
+          title="Estado de sincronización (clic para actualizar)"
           class="lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20">
           <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
           <span>Al día</span>
@@ -68,7 +76,8 @@
 
       <!-- INDICADORES DE SESIÓN Y COLA OFFLINE -->
       <div class="hidden lg:flex items-center gap-2.5">
-        <button type="button" id="sync-badge" onclick="SyncEngine.processQueue()"
+        <button type="button" id="sync-badge"
+          onclick="SyncEngine.processQueue().then(() => SyncEngine.pullLatestState(true).catch(() => {}))"
           title="Clic para forzar sincronización"
           class="flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 hover:opacity-80">
           <svg id="sync-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -277,15 +286,15 @@
         </h2>
 
         <div class="flex flex-col lg:flex-row items-center gap-2 w-full xl:w-auto">
-          <!-- Rango de fechas sincronizado -->
+          <!-- Rango de fechas sincronizado con script.js (inDesdeActivos / inHastaActivos) -->
           <div
             class="flex items-center gap-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-1.5 w-full lg:w-auto">
             <span class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Desde</span>
-            <input type="date" id="inDesdeDescargos"
+            <input type="date" id="inDesdeActivos"
               class="bg-transparent text-xs sm:text-sm text-gray-700 dark:text-gray-300 outline-none w-full lg:w-auto">
             <div class="w-px h-4 bg-gray-300 dark:bg-gray-700 mx-1"></div>
             <span class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Hasta</span>
-            <input type="date" id="inHastaDescargos"
+            <input type="date" id="inHastaActivos"
               class="bg-transparent text-xs sm:text-sm text-gray-700 dark:text-gray-300 outline-none w-full lg:w-auto">
           </div>
 
