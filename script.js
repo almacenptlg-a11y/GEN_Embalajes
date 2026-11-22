@@ -1,6 +1,6 @@
 /**
- * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics v1.3.2-OPT)
- * @architecture Zero-Trust | Offline-First | Optimistic UI O(1) | Auto-Split Excedentes | Dual Print (A4 / 80mm)
+ * @fileoverview Frontend AppLogic - Sistema de Embalajes y Cargos (GenLogistics v1.3.3-OPT)
+ * @architecture Zero-Trust | Offline-First | Optimistic UI O(1) | Auto-Split Excedentes | Dual Direct Print (A4 / 80mm)
  */
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-QJ6RZdmQw3gJIt80Y6f4iTKyS7BqhXrgHTGWrO0PiSj4m/exec";
@@ -111,7 +111,6 @@ const AuthRules = {
     const rol = this.norm(this.extractRawRole());
     if (!rol) return false;
 
-    // Política Zero-Trust: Únicamente Administrador tiene acceso total
     return rol === 'ADMIN' || rol === 'ADMINISTRADOR' || rol.startsWith('ADMINISTRADOR');
   },
 
@@ -191,9 +190,9 @@ window.addEventListener('message', (event) => {
   }
 });
 
-// Delegación global de eventos para botones de sincronización (inmune a re-renders)
+// Delegación global de eventos para botones de sincronización (soporta botón único y legacy)
 document.addEventListener('click', (e) => {
-  const syncBtn = e.target.closest('#sync-badge, #btnSyncMobile, #btnRefreshCargos, #btnRefreshHistorico');
+  const syncBtn = e.target.closest('#btnSyncGlobalDesktop, #btnSyncGlobalMobile, #sync-badge, #btnSyncMobile, #btnRefreshCargos, #btnRefreshHistorico');
   if (syncBtn) {
     window.forzarSincronizacionManual(e);
   }
@@ -240,40 +239,66 @@ function actualizarUIUsuario() {
 }
 
 // ==========================================
-// 3. UI Y MOTOR DE SINCRONIZACIÓN MANUAL BLINDADO
+// 3. UI Y MOTOR DE SINCRONIZACIÓN UNIFICADO
 // ==========================================
 function actualizarBadgeSync(pendingCount, isOnline) {
-  const badgeDesktop = document.getElementById('sync-badge');
-  const iconDesktop = document.getElementById('sync-icon');
-  const textDesktop = document.getElementById('sync-text');
-  const btnMobile = document.getElementById('btnSyncMobile');
+  const badgeDesktop = document.getElementById('btnSyncGlobalDesktop') || document.getElementById('sync-badge');
+  const iconDesktop = document.getElementById('syncIconDesktop') || document.getElementById('sync-icon');
+  const textDesktop = document.getElementById('syncTextDesktop') || document.getElementById('sync-text');
 
-  if (!badgeDesktop || !btnMobile) return;
+  const btnMobile = document.getElementById('btnSyncGlobalMobile') || document.getElementById('btnSyncMobile');
+  const iconMobile = document.getElementById('syncIconMobile');
+  const textMobile = document.getElementById('syncTextMobile');
 
   if (!isOnline) {
-    badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-500/30";
-    iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3"></path>`;
-    iconDesktop.classList.remove('animate-spin-sync');
-    textDesktop.textContent = pendingCount > 0 ? `Offline (${pendingCount} en cola)` : `Modo Offline`;
-
-    btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/20";
-    btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500"></span><span>Offline${pendingCount > 0 ? ` (${pendingCount})` : ''}</span>`;
+    if (badgeDesktop && iconDesktop && textDesktop) {
+      badgeDesktop.className = "hidden lg:flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-500/30";
+      iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3"></path>`;
+      iconDesktop.classList.remove('animate-spin-sync');
+      textDesktop.textContent = pendingCount > 0 ? `Offline (${pendingCount} en cola)` : `Modo Offline`;
+    }
+    if (btnMobile) {
+      btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/20";
+      if (iconMobile && textMobile) {
+        iconMobile.classList.remove('animate-spin-sync');
+        textMobile.textContent = `Offline${pendingCount > 0 ? ` (${pendingCount})` : ''}`;
+      } else {
+        btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500"></span><span>Offline${pendingCount > 0 ? ` (${pendingCount})` : ''}</span>`;
+      }
+    }
   } else if (pendingCount > 0) {
-    badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-500/30";
-    iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>`;
-    iconDesktop.classList.add('animate-spin-sync');
-    textDesktop.textContent = `Sincronizando (${pendingCount})...`;
-
-    btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-500/20";
-    btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span><span>Subiendo (${pendingCount})</span>`;
+    if (badgeDesktop && iconDesktop && textDesktop) {
+      badgeDesktop.className = "hidden lg:flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-500/30";
+      iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>`;
+      iconDesktop.classList.add('animate-spin-sync');
+      textDesktop.textContent = `Sincronizando (${pendingCount})...`;
+    }
+    if (btnMobile) {
+      btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-500/20";
+      if (iconMobile && textMobile) {
+        iconMobile.classList.add('animate-spin-sync');
+        textMobile.textContent = `Subiendo (${pendingCount})`;
+      } else {
+        btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span><span>Subiendo (${pendingCount})</span>`;
+      }
+    }
   } else {
-    badgeDesktop.className = "flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 hover:opacity-80";
-    iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>`;
-    iconDesktop.classList.remove('animate-spin-sync');
-    textDesktop.textContent = `Sincronizado`;
-
-    btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20";
-    btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span>Al día</span>`;
+    if (badgeDesktop && iconDesktop && textDesktop) {
+      badgeDesktop.className = "hidden lg:flex items-center gap-2 text-xs font-bold px-3.5 py-1.5 rounded-full border transition-all cursor-pointer bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/30 hover:opacity-80";
+      iconDesktop.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>`;
+      iconDesktop.classList.remove('animate-spin-sync');
+      textDesktop.textContent = `Sincronizado`;
+    }
+    if (btnMobile) {
+      btnMobile.className = "lg:hidden flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-all bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20";
+      if (iconMobile && textMobile) {
+        iconMobile.classList.remove('animate-spin-sync');
+        iconMobile.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>`;
+        textMobile.textContent = `Sincronizado`;
+      } else {
+        btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span>Al día</span>`;
+      }
+    }
   }
 }
 
@@ -294,7 +319,6 @@ function handleRemoteSyncUpdate({ cargosActivos, historial }) {
     }
   }
 
-  // Si un cargo LOC- estaba abierto en modal y ya fue reemplazado por su GCM oficial en servidor
   if (cargoActualModalId && String(cargoActualModalId).startsWith("LOC-")) {
     const sigueExistiendo = AppState.cargosActivos.some(c => c.idCargo === cargoActualModalId);
     if (!sigueExistiendo) {
@@ -314,21 +338,26 @@ window.forzarSincronizacionManual = async function (e) {
   }
 
   isManualSyncRunning = true;
-  const iconDesktop = document.getElementById('sync-icon');
-  const textDesktop = document.getElementById('sync-text');
-  const btnMobile = document.getElementById('btnSyncMobile');
+  const iconDesktop = document.getElementById('syncIconDesktop') || document.getElementById('sync-icon');
+  const textDesktop = document.getElementById('syncTextDesktop') || document.getElementById('sync-text');
+  const btnMobile = document.getElementById('btnSyncGlobalMobile') || document.getElementById('btnSyncMobile');
+  const iconMobile = document.getElementById('syncIconMobile');
+  const textMobile = document.getElementById('syncTextMobile');
 
   if (iconDesktop) iconDesktop.classList.add('animate-spin-sync');
   if (textDesktop) textDesktop.textContent = 'Sincronizando...';
-  if (btnMobile) btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span><span>Buscando...</span>`;
+  if (iconMobile && textMobile) {
+    iconMobile.classList.add('animate-spin-sync');
+    textMobile.textContent = 'Sincronizando...';
+  } else if (btnMobile) {
+    btnMobile.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span><span>Buscando...</span>`;
+  }
 
   try {
-    // 1. Vaciar cola de mutaciones locales si existiera
     if (typeof SyncEngine !== 'undefined' && typeof SyncEngine.processQueue === 'function') {
       await SyncEngine.processQueue();
     }
 
-    // 2. Verificar que no queden ítems locales pendientes antes de pisar con datos remotos
     let pendingItems = [];
     if (typeof SyncEngine !== 'undefined' && typeof SyncEngine.getQueueItems === 'function') {
       pendingItems = await SyncEngine.getQueueItems();
@@ -339,7 +368,6 @@ window.forzarSincronizacionManual = async function (e) {
       return;
     }
 
-    // 3. Descarga directa con Cache-Buster y Bypass de caché servidor (nocache=1)
     const bust = `_t=${Date.now()}&nocache=1`;
     const tokenParam = encodeURIComponent(API_SECRET_TOKEN);
 
@@ -378,7 +406,6 @@ window.forzarSincronizacionManual = async function (e) {
       historial: jsonHistory.data
     });
 
-    // Forzar repintado de ambas vistas en memoria
     renderizarCargosFiltrados();
     renderizarHistorico();
 
@@ -389,6 +416,7 @@ window.forzarSincronizacionManual = async function (e) {
   } finally {
     isManualSyncRunning = false;
     if (iconDesktop) iconDesktop.classList.remove('animate-spin-sync');
+    if (iconMobile) iconMobile.classList.remove('animate-spin-sync');
 
     let pendingCount = 0;
     try {
@@ -1098,7 +1126,7 @@ async function handleFormSubmit(e) {
   });
 
   if (document.getElementById("chkAutoPrint")?.checked) {
-    generarDocumentoImpresion(idLocal, 'A4');
+    generarDocumentoImpresion(idLocal, 'TICKET');
   }
 
   mostrarToast(`Cargo ${idLocal} registrado. Sincronizando en segundo plano...`);
@@ -1152,13 +1180,13 @@ document.getElementById("selFiltroColumna")?.addEventListener("change", renderiz
 function sincronizarFechasGlobales(tipo, valor) {
   if (tipo === "desde") {
     AppState.filtrosGlobales.fechaDesde = valor;
-    const elDesc = document.getElementById("inDesdeDescargos");
+    const elDesc = document.getElementById("inDesdeDescargos") || document.getElementById("inDesdeActivos");
     const elHist = document.getElementById("inDesdeHistorico");
     if (elDesc && elDesc.value !== valor) elDesc.value = valor;
     if (elHist && elHist.value !== valor) elHist.value = valor;
   } else {
     AppState.filtrosGlobales.fechaHasta = valor;
-    const elDesc = document.getElementById("inHastaDescargos");
+    const elDesc = document.getElementById("inHastaDescargos") || document.getElementById("inHastaActivos");
     const elHist = document.getElementById("inHastaHistorico");
     if (elDesc && elDesc.value !== valor) elDesc.value = valor;
     if (elHist && elHist.value !== valor) elHist.value = valor;
@@ -1169,6 +1197,8 @@ function sincronizarFechasGlobales(tipo, valor) {
 
 document.getElementById("inDesdeDescargos")?.addEventListener("change", (e) => sincronizarFechasGlobales("desde", e.target.value));
 document.getElementById("inHastaDescargos")?.addEventListener("change", (e) => sincronizarFechasGlobales("hasta", e.target.value));
+document.getElementById("inDesdeActivos")?.addEventListener("change", (e) => sincronizarFechasGlobales("desde", e.target.value));
+document.getElementById("inHastaActivos")?.addEventListener("change", (e) => sincronizarFechasGlobales("hasta", e.target.value));
 document.getElementById("inDesdeHistorico")?.addEventListener("change", (e) => sincronizarFechasGlobales("desde", e.target.value));
 document.getElementById("inHastaHistorico")?.addEventListener("change", (e) => sincronizarFechasGlobales("hasta", e.target.value));
 
@@ -1190,7 +1220,7 @@ window.limpiarFiltrosGlobales = function () {
   AppState.filtrosGlobales.fechaDesde = "";
   AppState.filtrosGlobales.fechaHasta = "";
 
-  ["inDesdeDescargos", "inHastaDescargos", "inDesdeHistorico", "inHastaHistorico"].forEach(id => {
+  ["inDesdeDescargos", "inHastaDescargos", "inDesdeActivos", "inHastaActivos", "inDesdeHistorico", "inHastaHistorico"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = "";
   });
@@ -1457,6 +1487,7 @@ function renderizarTablaUI(cargos) {
             <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('choferNombre')">Chofer ${getSortIcon("choferNombre")}</th>
             <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('fecha')">Hora Salida / SLA ${getSortIcon("hora")}</th>
             <th class="px-4 py-4 text-center">Estado</th>
+            <th class="px-4 py-4 text-center">Imprimir</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200 dark:divide-gray-800/60 bg-white dark:bg-transparent">
@@ -1472,6 +1503,7 @@ function renderizarTablaUI(cargos) {
 
     const horaSalida = cargo.hora || "--/--/---- --:--:--";
     const isLocal = String(cargo.idCargo).startsWith("LOC-");
+    const safeId = escapeHTML(cargo.idCargo);
     let badgeEstadoHTML = "";
 
     if (totalDeuda > 0) {
@@ -1489,15 +1521,27 @@ function renderizarTablaUI(cargos) {
     }
 
     html += `
-      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${escapeHTML(cargo.idCargo)}')" title="Clic para ver detalles y liquidar">
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${safeId}')" title="Clic para ver detalles y liquidar">
         <td class="px-4 py-3 font-mono text-xs flex items-center gap-1.5 ${isLocal ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-500 dark:text-gray-400'}">
           ${isLocal ? `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping" title="Pendiente de sincronización"></span>` : ''}
-          ${escapeHTML(cargo.idCargo)}
+          ${safeId}
         </td>
         <td class="px-4 py-3"><span class="bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 px-2 py-1 rounded text-xs font-bold">${escapeHTML(cargo.placa || "S/N")}</span></td>
         <td class="px-4 py-3 font-bold text-gray-800 dark:text-gray-200 truncate max-w-[200px]">${escapeHTML(cargo.choferNombre)}</td>
         <td class="px-4 py-3 text-emerald-600 dark:text-emerald-400/80 font-mono text-xs tracking-wider">${escapeHTML(horaSalida)}${getBadgeSLA(horaSalida)}</td>
         <td class="px-4 py-3 text-center align-middle">${badgeEstadoHTML}</td>
+        <td class="px-4 py-3 text-center align-middle" onclick="event.stopPropagation()">
+          <div class="inline-flex items-center gap-1.5">
+            <button type="button" onclick="generarDocumentoImpresion('${safeId}', 'TICKET')" title="Imprimir Ticket 80mm"
+              class="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded-lg text-[11px] font-bold transition-all active:scale-95">
+              Ticket
+            </button>
+            <button type="button" onclick="generarDocumentoImpresion('${safeId}', 'A4')" title="Imprimir Hoja A4"
+              class="px-2.5 py-1 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white dark:bg-blue-500/15 dark:hover:bg-blue-600 dark:text-blue-300 dark:hover:text-white border border-blue-200 dark:border-blue-500/30 rounded-lg text-[11px] font-bold transition-all active:scale-95">
+              A4
+            </button>
+          </div>
+        </td>
       </tr>
     `;
   });
@@ -1550,7 +1594,6 @@ window.autocompletarDevolucionTotal = function () {
   mostrarToast("Deuda completa autocompletada al 100%.");
 };
 
-// Motor en tiempo real para detectar excedentes en el input "Retorna" y proponer nueva fila
 window.evaluarExcedenteDetalle = function (idDetalle, rawValue) {
   const siblings = document.querySelectorAll(`.mdl-return-input[data-id="${idDetalle}"]`);
   if (siblings.length === 0) return;
@@ -1675,7 +1718,9 @@ document.getElementById("btnGuardarExtraModal")?.addEventListener("click", async
           RESPONSABLE: responsableId
         }))
       };
-      AppState.cargosActivos.unshift(cargo);
+      if (deuda > 0) {
+        AppState.cargosActivos.unshift(cargo);
+      }
     }
   } else {
     responsableId = cleanId(cargo.choferId || cargo.detalles[0]?.RESPONSABLE);
@@ -1695,6 +1740,11 @@ document.getElementById("btnGuardarExtraModal")?.addEventListener("click", async
 
   if (cargo) {
     cargo.detalles.push(nuevoDetalle);
+    // Si todo quedó cerrado (deuda <= 0 en todas las líneas), asegurar que no permanezca en Viajes Pendientes
+    const quedaPendiente = cargo.detalles.some(d => parseInt(d.DEUDA || 0, 10) > 0);
+    if (!quedaPendiente) {
+      AppState.cargosActivos = AppState.cargosActivos.filter(c => c.idCargo !== cargoActualModalId);
+    }
     await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
   }
 
@@ -1770,12 +1820,12 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
       det.DEVUELVE = nuevoDevuelve;
       det.DEUDA = nuevaDeuda;
     }
-    const tieneSaldo = AppState.cargosActivos[cargoIdx].detalles.some(d => parseInt(d.DEUDA || 0, 10) !== 0);
-    if (!tieneSaldo) {
+    const tieneDeudaPositiva = AppState.cargosActivos[cargoIdx].detalles.some(d => parseInt(d.DEUDA || 0, 10) > 0);
+    if (!tieneDeudaPositiva) {
       AppState.cargosActivos.splice(cargoIdx, 1);
     }
     await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
-  } else if (nuevaDeuda !== 0) {
+  } else if (nuevaDeuda > 0) {
     const lineasHist = AppState.historial.filter(h => h.idCargo === idCargo);
     if (lineasHist.length > 0) {
       const ref = lineasHist[0];
@@ -1854,7 +1904,7 @@ window.eliminarLineaDetalle = async function (idCargo, idDetalle, nombreMaterial
       AppState.cargosActivos.splice(cargoIdx, 1);
       cargoVacio = true;
     } else {
-      const tieneSaldo = AppState.cargosActivos[cargoIdx].detalles.some(d => parseInt(d.DEUDA || 0, 10) !== 0);
+      const tieneSaldo = AppState.cargosActivos[cargoIdx].detalles.some(d => parseInt(d.DEUDA || 0, 10) > 0);
       if (!tieneSaldo) AppState.cargosActivos.splice(cargoIdx, 1);
     }
     await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
@@ -2199,7 +2249,8 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
 
   btnLiq.setAttribute("onclick", `procesarLiquidacionModal('${escapeHTML(cargo.idCargo)}')`);
 
-  const btnPrintA4 = document.getElementById("btnPrintModal");
+  // Botones directos de impresión sobre la vista preliminar (sin pasos intermedios)
+  const btnPrintA4 = document.getElementById("btnPrintA4Modal") || document.getElementById("btnPrintModal");
   if (btnPrintA4) btnPrintA4.onclick = () => generarDocumentoImpresion(cargo.idCargo, 'A4');
 
   const btnPrintTicket = document.getElementById("btnPrintTicketModal");
@@ -2229,6 +2280,9 @@ function abrirDetalle(idCargo, highlightMaterialId = null) {
   }, 50);
 }
 
+// ==========================================
+// 10.4 LIQUIDACIÓN DE DESCARGOS (CIERRE AUTOMÁTICO CON FALTANTE / EXCEDENTE)
+// ==========================================
 async function procesarLiquidacionModal(idCargo) {
   if (String(idCargo).startsWith("LOC-")) {
     return mostrarAlerta("Este cargo aún está pendiente de sincronización inicial. Espera a que obtenga su código oficial GCM.", "warning", "Sincronización en Curso");
@@ -2307,17 +2361,19 @@ async function procesarLiquidacionModal(idCargo) {
 
   const cargoIndex = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
   let totalFilasExcedenteCreadas = 0;
+  let totalFaltanteResidual = 0;
+  let totalExcedenteResidual = 0;
 
   if (cargoIndex !== -1) {
     const cargo = AppState.cargosActivos[cargoIndex];
-    let tieneSaldoPendiente = false;
     const nuevasFilasOptimistasCargo = [];
 
     cargo.detalles.forEach(det => {
       const mov = payloadDevolucion.find(p => p.id_detalle === det.ID_DETALLE);
+      const lleva = parseInt(det.LLEVA || 0, 10);
+      const devPrevio = parseInt(det.DEVUELVE || 0, 10);
+
       if (mov) {
-        const lleva = parseInt(det.LLEVA || 0, 10);
-        const devPrevio = parseInt(det.DEVUELVE || 0, 10);
         const deudaPend = Math.max(0, lleva - devPrevio);
 
         if (mov.splitExcedente && mov.qty > deudaPend && lleva > 0) {
@@ -2325,6 +2381,7 @@ async function procesarLiquidacionModal(idCargo) {
           det.DEVUELVE = lleva;
           det.DEUDA = 0;
           totalFilasExcedenteCreadas++;
+          totalExcedenteResidual += excedenteQty;
 
           const tempExcId = `LOC-EXC-${Date.now().toString(36).toUpperCase()}-${totalFilasExcedenteCreadas}`;
           nuevasFilasOptimistasCargo.push({
@@ -2358,29 +2415,38 @@ async function procesarLiquidacionModal(idCargo) {
         } else {
           det.DEVUELVE = devPrevio + mov.qty;
           det.DEUDA = lleva - det.DEVUELVE;
+          if (det.DEUDA > 0) totalFaltanteResidual += det.DEUDA;
+          if (det.DEUDA < 0) totalExcedenteResidual += Math.abs(det.DEUDA);
         }
 
         const histOrig = AppState.historial.find(h => h.idDetalle === det.ID_DETALLE);
         if (histOrig) {
           histOrig.devuelve = det.DEVUELVE;
           histOrig.deuda = det.DEUDA;
-          histOrig.estado = det.DEUDA > 0 ? 'Pendiente' : (det.DEUDA < 0 ? 'Excedente' : 'Devolución completa');
+          histOrig.estado = det.DEUDA > 0 ? 'Faltante' : (det.DEUDA < 0 ? 'Excedente' : 'Devolución completa');
+          histOrig.horaDescargo = fechaFormat;
+          histOrig.gestorDescargo = gestorNombre;
+        }
+      } else {
+        // Líneas no digitadas en el retorno también se cierran como faltante del viaje
+        const deudaLinea = lleva - devPrevio;
+        if (deudaLinea > 0) totalFaltanteResidual += deudaLinea;
+        const histOrig = AppState.historial.find(h => h.idDetalle === det.ID_DETALLE);
+        if (histOrig && deudaLinea > 0) {
+          histOrig.estado = 'Faltante';
           histOrig.horaDescargo = fechaFormat;
           histOrig.gestorDescargo = gestorNombre;
         }
       }
-
-      if (parseInt(det.DEUDA || 0, 10) !== 0) tieneSaldoPendiente = true;
     });
 
     if (nuevasFilasOptimistasCargo.length > 0) {
       cargo.detalles.push(...nuevasFilasOptimistasCargo);
-      tieneSaldoPendiente = true;
     }
 
-    if (!tieneSaldoPendiente) {
-      AppState.cargosActivos.splice(cargoIndex, 1);
-    }
+    // REGLA DE NEGOCIO: Todo descargo registrado (incluso con nota de faltante o excedente)
+    // sale inmediatamente de Viajes Pendientes y pasa a Histórico.
+    AppState.cargosActivos.splice(cargoIndex, 1);
 
     await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
     await SyncEngine.saveCache('historial', AppState.historial);
@@ -2389,15 +2455,21 @@ async function procesarLiquidacionModal(idCargo) {
   await SyncEngine.enqueueMutation('updateDevolucion', {
     data: payloadDevolucion,
     gestorNombre,
-    gestorRol: AuthRules.currentUserRole()
+    gestorRol: AuthRules.currentUserRole(),
+    forzarCierreConNota: true
   });
 
   cerrarDetalle();
   renderizarCargosFiltrados();
-  if (totalFilasExcedenteCreadas > 0) {
-    mostrarToast(`Cargo ${idCargo} liquidado + ${totalFilasExcedenteCreadas} fila(s) de excedente creada(s).`);
+
+  if (totalFaltanteResidual > 0 && totalExcedenteResidual > 0) {
+    mostrarToast(`Cargo ${idCargo} cerrado con nota de faltante (${totalFaltanteResidual}) y excedente (${totalExcedenteResidual}).`);
+  } else if (totalFaltanteResidual > 0) {
+    mostrarToast(`Cargo ${idCargo} cerrado con nota de FALTANTE (${totalFaltanteResidual} und.). Movido a Histórico.`);
+  } else if (totalExcedenteResidual > 0 || totalFilasExcedenteCreadas > 0) {
+    mostrarToast(`Cargo ${idCargo} cerrado con nota de EXCEDENTE (+${totalExcedenteResidual} und.). Movido a Histórico.`);
   } else {
-    mostrarToast(`Liquidación del cargo ${idCargo} guardada. Sincronizando...`);
+    mostrarToast(`Liquidación del cargo ${idCargo} guardada al 100%. Sincronizando...`);
   }
 
   if (!document.getElementById('viewHistorico').classList.contains('hidden')) renderizarHistorico();
@@ -2479,7 +2551,7 @@ function renderizarKPIsHistorico(registrosFiltrados) {
     </div>
 
     <div class="bg-gray-50 dark:bg-gray-900/70 border border-gray-200 dark:border-gray-700/80 rounded-2xl p-3.5 shadow-sm">
-      <p class="text-[10px] font-bold uppercase tracking-wider text-pink-600 dark:text-pink-400">Saldo Pendiente</p>
+      <p class="text-[10px] font-bold uppercase tracking-wider text-pink-600 dark:text-pink-400">Saldo Faltante</p>
       <p class="text-xl font-black text-pink-600 dark:text-pink-400 mt-0.5">${totalPendiente.toLocaleString()} <span class="text-xs font-normal text-gray-500">und.</span></p>
     </div>
   `;
@@ -2607,6 +2679,9 @@ function renderizarHistorico() {
     return;
   }
 
+  // Mapa rápido de IDs aún activos para distinguir "Pendiente en ruta" vs "Cerrado con Faltante"
+  const idsActivosSet = new Set(AppState.cargosActivos.map(c => c.idCargo));
+
   let html = `
     <div class="overflow-x-auto no-scrollbar md:rounded-xl border-y md:border border-gray-200 dark:border-gray-700/80 shadow-sm dark:shadow-inner max-h-[600px] relative bg-white dark:bg-transparent">
       <table class="min-w-max w-full text-left text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">
@@ -2620,7 +2695,8 @@ function renderizarHistorico() {
             <th class="px-3 py-3 text-center border-r border-gray-200 dark:border-gray-800/50 text-gray-800 dark:text-white cursor-pointer hover:text-black dark:hover:text-gray-300 transition-colors" onclick="setHistorySort('lleva')">Lleva ${getHistorySortIcon('lleva')}</th>
             <th class="px-3 py-3 text-center border-r border-gray-200 dark:border-gray-800/50 text-emerald-600 dark:text-emerald-400 cursor-pointer hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors" onclick="setHistorySort('devuelve')">Devuelto ${getHistorySortIcon('devuelve')}</th>
             <th class="px-3 py-3 text-center border-r border-gray-200 dark:border-gray-800/50 text-pink-600 dark:text-pink-400 cursor-pointer hover:text-pink-700 dark:hover:text-pink-300 transition-colors" onclick="setHistorySort('deuda')">Deuda ${getHistorySortIcon('deuda')}</th>
-            <th class="px-4 py-3 text-center">Estado</th>
+            <th class="px-4 py-3 text-center">Estado / Nota</th>
+            <th class="px-3 py-3 text-center">Imprimir</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200 dark:divide-gray-800/60">
@@ -2629,24 +2705,30 @@ function renderizarHistorico() {
   filtrados.forEach(row => {
     let badgeEstadoHTML = "";
     const deuda = parseInt(row.deuda, 10);
+    const sigueEnRuta = idsActivosSet.has(row.idCargo);
+    const safeCargoId = escapeHTML(row.idCargo || '--');
 
     if (deuda > 0) {
-      badgeEstadoHTML = `<span class="bg-pink-50 dark:bg-pink-600/20 text-pink-600 dark:text-pink-400 border border-pink-200 dark:border-pink-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Pendiente</span>`;
+      if (sigueEnRuta) {
+        badgeEstadoHTML = `<span class="bg-pink-50 dark:bg-pink-600/20 text-pink-600 dark:text-pink-400 border border-pink-200 dark:border-pink-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">En Ruta (-${deuda})</span>`;
+      } else {
+        badgeEstadoHTML = `<span class="bg-red-50 dark:bg-red-600/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-500/30 px-2 py-1 rounded text-[10px] font-extrabold uppercase tracking-wider">Nota Faltante (-${deuda})</span>`;
+      }
     } else if (deuda < 0) {
-      badgeEstadoHTML = `<span class="bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Excedente</span>`;
+      badgeEstadoHTML = `<span class="bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30 px-2 py-1 rounded text-[10px] font-extrabold uppercase tracking-wider">Nota Excedente (+${Math.abs(deuda)})</span>`;
     } else {
-      badgeEstadoHTML = `<span class="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Cerrado</span>`;
+      badgeEstadoHTML = `<span class="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30 px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider">Cerrado 100%</span>`;
     }
 
     html += `
-      <tr onclick="abrirDetalle('${escapeHTML(row.idCargo)}', '${escapeHTML(row.material)}')" title="Clic para abrir el cargo y gestionar liquidación" class="hover:bg-blue-50/40 dark:hover:bg-gray-800/70 transition-colors group cursor-pointer">
+      <tr onclick="abrirDetalle('${safeCargoId}', '${escapeHTML(row.material)}')" title="Clic para abrir el cargo y gestionar liquidación" class="hover:bg-blue-50/40 dark:hover:bg-gray-800/70 transition-colors group cursor-pointer">
         <td class="px-4 py-3.5 font-mono text-gray-500 dark:text-gray-400 text-[11px] hover:bg-blue-100/60 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-300 transition-colors celda-trazabilidad border-l-2 border-transparent hover:border-blue-500" onclick="event.stopPropagation(); abrirTrazabilidad(event, '${escapeHTML(row.idDetalle)}')">
           <div class="flex items-center gap-1.5" title="Click para ver auditoría">
             <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
             ${escapeHTML(row.horaCargo || '--')}
           </div>
         </td>
-        <td class="px-4 py-3.5 font-mono text-blue-600 dark:text-blue-400 font-bold tracking-tight">${escapeHTML(row.idCargo || '--')}</td>
+        <td class="px-4 py-3.5 font-mono text-blue-600 dark:text-blue-400 font-bold tracking-tight">${safeCargoId}</td>
         <td class="px-4 py-3.5 truncate max-w-[150px] font-medium text-gray-800 dark:text-gray-200" title="${escapeHTML(row.choferName)}">${escapeHTML(row.choferName)}</td>
         <td class="px-4 py-3.5 truncate max-w-[200px]" title="${escapeHTML(row.materialName)}">${escapeHTML(row.materialName)}</td>
         <td class="px-4 py-3.5 truncate max-w-[150px] text-gray-500 dark:text-gray-400" title="${escapeHTML(row.destinoName)}">${escapeHTML(row.destinoName)}</td>
@@ -2654,6 +2736,18 @@ function renderizarHistorico() {
         <td class="px-3 py-3.5 text-center text-emerald-600 dark:text-emerald-400 font-black bg-emerald-50 dark:bg-emerald-900/10">${row.devuelve}</td>
         <td class="px-3 py-3.5 text-center ${deuda > 0 ? 'text-pink-600 dark:text-pink-400 bg-pink-50 dark:bg-pink-900/10' : 'text-gray-500'} font-black">${deuda}</td>
         <td class="px-4 py-3.5 text-center">${badgeEstadoHTML}</td>
+        <td class="px-3 py-3.5 text-center" onclick="event.stopPropagation()">
+          <div class="inline-flex items-center gap-1">
+            <button type="button" onclick="generarDocumentoImpresion('${safeCargoId}', 'TICKET')" title="Imprimir Ticket 80mm"
+              class="px-2 py-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded text-[10px] font-bold">
+              Ticket
+            </button>
+            <button type="button" onclick="generarDocumentoImpresion('${safeCargoId}', 'A4')" title="Imprimir A4"
+              class="px-2 py-1 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white dark:bg-blue-500/15 dark:hover:bg-blue-600 dark:text-blue-300 dark:hover:text-white border border-blue-200 dark:border-blue-500/30 rounded text-[10px] font-bold">
+              A4
+            </button>
+          </div>
+        </td>
       </tr>
     `;
   });
@@ -2742,7 +2836,7 @@ window.abrirTrazabilidad = function (e, idDetalle) {
 };
 
 // ==========================================
-// 13. MOTOR DE IMPRESIÓN DUAL (A4 Y TICKET 80MM OFFLINE-READY)
+// 13. MOTOR DE IMPRESIÓN DIRECTA DUAL (A4 Y TICKET 80MM AGRUPADOS POR DESTINO)
 // ==========================================
 window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
   let cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
@@ -2764,6 +2858,7 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
       firmaCargo: null,
       detalles: lineasHist.map((h) => ({
         LLEVA: h.lleva,
+        DEVUELVE: h.devuelve,
         DESTINO: h.destino,
         MATERIAL: h.material,
         EMISOR: h.emisor
@@ -2775,12 +2870,15 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
   let totalM3Llevado = 0;
   const destinosSet = new Set();
   const resumenTipos = {};
+  const gruposPorDestino = new Map();
 
-  const itemsProcesados = cargo.detalles.map((d) => {
+  cargo.detalles.forEach((d) => {
     const lleva = parseInt(d.LLEVA || 0, 10);
+    const devuelve = parseInt(d.DEVUELVE || 0, 10);
     totalLlevado += lleva;
+
     const destinoCat = AppState.datos.destinos.find((x) => cleanId(x.ID_DSTN) === cleanId(d.DESTINO));
-    const nombreDestino = destinoCat ? destinoCat.REFERENCIA : d.DESTINO || "Desconocido";
+    const nombreDestino = destinoCat ? destinoCat.REFERENCIA : d.DESTINO || "Sin Destino";
     const materialCat = AppState.datos.materiales.find((m) => cleanId(m.ID_MEMB) === cleanId(d.MATERIAL));
     const nombreMaterial = materialCat ? materialCat.DESCRIPCION : d.MATERIAL || "Desconocido";
 
@@ -2790,7 +2888,19 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
     destinosSet.add(nombreDestino);
     resumenTipos[nombreMaterial] = (resumenTipos[nombreMaterial] || 0) + lleva;
 
-    return { nombreDestino, nombreMaterial, lleva };
+    const claveGrupo = nombreDestino.trim().toUpperCase();
+    if (!gruposPorDestino.has(claveGrupo)) {
+      gruposPorDestino.set(claveGrupo, {
+        destino: nombreDestino,
+        items: [],
+        subtotalLleva: 0,
+        subtotalDevuelve: 0
+      });
+    }
+    const grupo = gruposPorDestino.get(claveGrupo);
+    grupo.items.push({ nombreMaterial, lleva, devuelve });
+    grupo.subtotalLleva += lleva;
+    grupo.subtotalDevuelve += devuelve;
   });
 
   const areaRaw = cargo.detalles[0]?.EMISOR || cargo.area || "Almacén PT";
@@ -2802,17 +2912,34 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
   let htmlPlantilla = "";
 
   if (formato === 'TICKET') {
-    const filasTicketHTML = itemsProcesados.map((item) => `
-      <tr style="border-bottom: 1px dashed #9ca3af;">
-        <td style="padding: 4px 2px; vertical-align: top;">
-          <div style="font-weight: 700; font-size: 12px; line-height: 1.2;">${escapeHTML(item.nombreMaterial)}</div>
-          <div style="font-size: 11px; color: #374151;">${escapeHTML(item.nombreDestino)}</div>
-        </td>
-        <td style="padding: 4px 2px; text-align: right; vertical-align: top; font-weight: 900; font-size: 12px; font-family: monospace;">
-          ${item.lleva}
-        </td>
-      </tr>
-    `).join("");
+    // Agrupación visual por Destino en Ticket 80mm
+    let bloquesDestinosTicketHTML = "";
+    gruposPorDestino.forEach((grupo) => {
+      const filasItems = grupo.items.map((it) => `
+        <tr style="border-bottom: 1px dotted #9ca3af;">
+          <td style="padding: 3px 2px; vertical-align: top; font-weight: 600; font-size: 11px; line-height: 1.2;">
+            ${escapeHTML(it.nombreMaterial)}
+          </td>
+          <td style="padding: 3px 2px; text-align: right; vertical-align: top; font-weight: 900; font-size: 11px; font-family: monospace; white-space: nowrap;">
+            ${it.lleva} und
+          </td>
+        </tr>
+      `).join("");
+
+      bloquesDestinosTicketHTML += `
+        <div style="margin-top: 6px; border: 1px solid #000; border-radius: 3px; overflow: hidden; page-break-inside: avoid;">
+          <div style="background: #000; color: #fff; padding: 3px 5px; font-size: 10px; font-weight: 800; display: flex; justify-content: space-between; align-items: center;">
+            <span>📍 ${escapeHTML(grupo.destino)}</span>
+            <span style="font-family: monospace; background: #fff; color: #000; padding: 0 4px; border-radius: 2px;">Sub: ${grupo.subtotalLleva}</span>
+          </div>
+          <div style="padding: 2px 4px;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tbody>${filasItems}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    });
 
     const resumenTicketHTML = Object.keys(resumenTipos).map((tipo) => `
       <div style="display: flex; justify-content: space-between; font-size: 10px; line-height: 1.35;">
@@ -2831,66 +2958,32 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: #e5e7eb;
+      background: #ffffff;
       color: #000000;
       font-size: 11px;
       -webkit-print-color-adjust: exact !important;
       print-color-adjust: exact !important;
     }
     .ticket-wrapper {
-      width: 76mm;
+      width: 72mm;
       max-width: 100%;
-      margin: 12px auto;
+      margin: 0 auto;
       background: #ffffff;
-      padding: 4mm 3mm;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+      padding: 2mm;
     }
     .center { text-align: center; }
     .divider-dashed { border-top: 1px dashed #000; margin: 6px 0; }
     .meta-row { display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 2px; gap: 4px; }
     .meta-label { font-weight: 700; text-transform: uppercase; }
-    table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-    th {
-      font-size: 9px;
-      text-transform: uppercase;
-      border-top: 1px solid #000;
-      border-bottom: 1px solid #000;
-      padding: 3px 2px;
-      text-align: left;
-    }
-    .toolbar-float {
-      position: fixed; bottom: 16px; right: 16px;
-      display: flex; gap: 8px; z-index: 50;
-    }
-    .btn-float {
-      background: #111827; color: #fff; border: none;
-      padding: 10px 18px; border-radius: 9999px;
-      font-weight: 700; font-size: 12px; cursor: pointer;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-    }
-    .btn-secondary { background: #2563eb; }
     @media print {
-      body { background: #ffffff; }
-      .ticket-wrapper {
-        width: 72mm;
-        margin: 0;
-        padding: 1mm 2mm;
-        box-shadow: none;
-      }
-      .no-print { display: none !important; }
       @page { size: 80mm auto; margin: 0; }
     }
   </style>
 </head>
 <body>
-  <div class="toolbar-float no-print">
-    <button onclick="window.opener?.generarDocumentoImpresion('${escapeHTML(cargo.idCargo)}', 'A4'); window.close();" class="btn-float btn-secondary">📄 Cambiar a A4</button>
-    <button onclick="window.print()" class="btn-float">🖨️ Imprimir Ticket</button>
-  </div>
-
   <div class="ticket-wrapper">
     <div class="center">
-      <img src="${logoSvgUri}" style="width: 95px; height: auto; margin: 0 auto 2px auto; display: block;" alt="La Genovesa">
+      <img src="${logoSvgUri}" style="width: 90px; height: auto; margin: 0 auto 2px auto; display: block;" alt="La Genovesa">
       <div style="font-weight: 800; font-size: 11px;">LA GENOVESA AGROINDUSTRIAS S.A.</div>
       <div style="font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;">${escapeHTML(areaResponsable)}</div>
       <div style="font-weight: 900; font-size: 12px; margin-top: 4px; border: 1px solid #000; padding: 2px;">CARGO DE EMBALAJES</div>
@@ -2904,19 +2997,13 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
     <div style="font-size: 10px; margin-top: 2px;"><span class="meta-label">Chofer:</span> ${escapeHTML(cargo.choferNombre)}</div>
     <div style="font-size: 9px; margin-top: 1px;"><span class="meta-label">Despachó:</span> ${escapeHTML(cargo.gestor || "No registrado")}</div>
 
-    <table>
-      <thead>
-        <tr>
-          <th>Material / Destino</th>
-          <th style="text-align: right;">Cant.</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${filasTicketHTML}
-      </tbody>
-    </table>
+    <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; margin-top: 6px; border-top: 1px solid #000; padding-top: 3px;">
+      Detalle Agrupado por Destino (${gruposPorDestino.size}):
+    </div>
 
-    <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 2px; border-bottom: 1.5px solid #000; font-weight: 900; font-size: 12px;">
+    ${bloquesDestinosTicketHTML}
+
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 2px; margin-top: 6px; border-top: 1.5px solid #000; border-bottom: 1.5px solid #000; font-weight: 900; font-size: 12px;">
       <span>TOTAL UNIDADES:</span>
       <span style="font-family: monospace;">${totalLlevado} und (${totalM3Llevado.toFixed(2)} m³)</span>
     </div>
@@ -2943,14 +3030,36 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
 </body>
 </html>`;
   } else {
-    const filasTablaHTML = itemsProcesados.map((item) => `
-      <tr>
-        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; color: #4b5563;">${escapeHTML(item.nombreDestino)}</td>
-        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #1f2937;">${escapeHTML(item.nombreMaterial)}</td>
-        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: center; font-weight: 700; color: #111827;">${item.lleva}</td>
-        <td style="padding: 4px 8px; border-bottom: 1px solid #e5e7eb; text-align: center;"></td>
-      </tr>
-    `).join("");
+    // Agrupación visual por Destino en Formato A4
+    let bloquesDestinosA4HTML = "";
+    gruposPorDestino.forEach((grupo) => {
+      const filasGrupo = grupo.items.map((it) => `
+        <tr>
+          <td style="padding: 5px 8px; border-bottom: 1px solid #e5e7eb; font-weight: 500; color: #1f2937;">${escapeHTML(it.nombreMaterial)}</td>
+          <td style="padding: 5px 8px; border-bottom: 1px solid #e5e7eb; text-align: center; font-weight: 700; color: #111827;">${it.lleva}</td>
+          <td style="padding: 5px 8px; border-bottom: 1px solid #e5e7eb; text-align: center; color: #059669; font-weight: 600;">${it.devuelve > 0 ? it.devuelve : ''}</td>
+        </tr>
+      `).join("");
+
+      bloquesDestinosA4HTML += `
+        <div style="margin-bottom: 12px; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden; page-break-inside: avoid;">
+          <div style="background: #1f2937; color: #ffffff; padding: 5px 10px; font-size: 11px; font-weight: 700; display: flex; justify-content: space-between; align-items: center;">
+            <span>DESTINO: ${escapeHTML(grupo.destino)}</span>
+            <span style="font-family: monospace; background: #374151; padding: 1px 6px; border-radius: 4px;">Subtotal: ${grupo.subtotalLleva} und</span>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; margin: 0;">
+            <thead>
+              <tr style="background: #f3f4f6; color: #4b5563; font-size: 9px; text-transform: uppercase;">
+                <th style="padding: 4px 8px; text-align: left; width: 66%;">Material / Embalaje</th>
+                <th style="padding: 4px 8px; text-align: center; width: 17%;">Lleva</th>
+                <th style="padding: 4px 8px; text-align: center; width: 17%;">Devolución</th>
+              </tr>
+            </thead>
+            <tbody>${filasGrupo}</tbody>
+          </table>
+        </div>
+      `;
+    });
 
     const destinosHTML = Array.from(destinosSet).map((dest) => `<div>• ${escapeHTML(dest)}</div>`).join("");
     const tiposHTML = Object.keys(resumenTipos).map((tipo) => `<div><span style="font-weight:700; margin-right:4px;">${resumenTipos[tipo]}</span> ${escapeHTML(tipo)}</div>`).join("");
@@ -2963,31 +3072,17 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
   <title>Cargo_${escapeHTML(cargo.idCargo)}_${escapeHTML(cargo.choferNombre.replace(/\s+/g, ""))}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, sans-serif; background-color: #f3f4f6; color: #1f2937; font-size: 12px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    .a4-container { max-width: 21cm; margin: 1rem auto; background: white; padding: 1cm; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
-    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1f2937; padding-bottom: 12px; margin-bottom: 16px; }
-    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; background: #f9fafb; padding: 12px; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-    th { background: #1f2937; color: white; font-size: 10px; text-transform: uppercase; padding: 6px 8px; text-align: left; }
-    tr:nth-child(even) { background-color: #f9fafb; }
+    body { font-family: system-ui, -apple-system, sans-serif; background-color: #ffffff; color: #1f2937; font-size: 12px; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    .a4-container { max-width: 21cm; margin: 0 auto; background: white; padding: 0.5cm; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1f2937; padding-bottom: 12px; margin-bottom: 14px; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; background: #f9fafb; padding: 10px 12px; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 14px; }
     .footer-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 16px; }
-    .toolbar-float { position: fixed; bottom: 24px; right: 24px; display: flex; gap: 10px; }
-    .btn-float { background: #1f2937; color: white; border: none; padding: 12px 24px; border-radius: 9999px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-    .btn-secondary { background: #2563eb; }
     @media print {
-      body { background: white; }
-      .a4-container { margin: 0; padding: 0; box-shadow: none; max-width: 100%; }
-      .no-print { display: none !important; }
-      @page { size: A4 portrait; margin: 0.5cm; }
+      @page { size: A4 portrait; margin: 0.6cm; }
     }
   </style>
 </head>
 <body>
-  <div class="toolbar-float no-print">
-    <button onclick="window.opener?.generarDocumentoImpresion('${escapeHTML(cargo.idCargo)}', 'TICKET'); window.close();" class="btn-float btn-secondary">🧾 Cambiar a Ticket 80mm</button>
-    <button onclick="window.print()" class="btn-float">🖨️ Imprimir / Guardar PDF</button>
-  </div>
-
   <div class="a4-container">
     <div class="header">
       <div style="width: 140px;">
@@ -3013,30 +3108,19 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
       </div>
     </div>
 
-    <table>
-      <thead>
-        <tr>
-          <th style="width: 33%;">Destino</th>
-          <th style="width: 33%;">Material</th>
-          <th style="text-align: center;">Lleva</th>
-          <th style="text-align: center;">Devolución</th>
-        </tr>
-      </thead>
-      <tbody style="border: 1px solid #e5e7eb;">
-        ${filasTablaHTML}
-      </tbody>
-      <tfoot>
-        <tr style="background: #f3f4f6; border-top: 1px solid #d1d5db;">
-          <td colspan="2" style="padding: 8px; text-align: right; font-weight: bold; color: #4b5563; font-size: 10px; text-transform: uppercase;">Total General del Viaje:</td>
-          <td style="padding: 8px; text-align: center; font-weight: 900; color: #1d4ed8; font-size: 14px;">${totalLlevado} und</td>
-          <td style="padding: 8px; text-align: center; font-family: monospace; color: #059669; font-weight: bold;">${totalM3Llevado.toFixed(3)} m³</td>
-        </tr>
-      </tfoot>
-    </table>
+    ${bloquesDestinosA4HTML}
+
+    <div style="background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+      <span style="font-weight: bold; color: #4b5563; font-size: 11px; text-transform: uppercase;">Total General del Viaje:</span>
+      <div>
+        <span style="font-weight: 900; color: #1d4ed8; font-size: 14px; margin-right: 14px;">${totalLlevado} und</span>
+        <span style="font-family: monospace; color: #059669; font-weight: bold; font-size: 12px;">${totalM3Llevado.toFixed(3)} m³</span>
+      </div>
+    </div>
 
     <div class="footer-grid">
       <div>
-        <h4 style="font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; padding-bottom: 2px; margin-bottom: 4px;">Destinos</h4>
+        <h4 style="font-size: 10px; font-weight: bold; color: #6b7280; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; padding-bottom: 2px; margin-bottom: 4px;">Destinos (${destinosSet.size})</h4>
         <div style="font-size: 10px; color: #374151; line-height: 1.4;">${destinosHTML}</div>
       </div>
       <div>
@@ -3056,10 +3140,39 @@ window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
 </html>`;
   }
 
-  const printWindow = window.open("", "_blank");
-  if (printWindow) {
-    printWindow.document.open();
-    printWindow.document.write(htmlPlantilla);
-    printWindow.document.close();
-  }
+  // Impresión directa automática sobre la vista preliminar/actual mediante Iframe oculto (Zero Pop-Ups)
+  const prevFrame = document.getElementById("gen-print-iframe");
+  if (prevFrame) prevFrame.remove();
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "gen-print-iframe";
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.visibility = "hidden";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(htmlPlantilla);
+  doc.close();
+
+  setTimeout(() => {
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch (err) {
+      console.warn("[PrintEngine] Fallback a ventana emergente:", err);
+      const printWindow = window.open("", "_blank");
+      if (printWindow) {
+        printWindow.document.open();
+        printWindow.document.write(htmlPlantilla);
+        printWindow.document.close();
+        setTimeout(() => { printWindow.focus(); printWindow.print(); }, 200);
+      }
+    }
+  }, 150);
 };
