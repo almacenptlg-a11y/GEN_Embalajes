@@ -1,411 +1,336 @@
 /**
- * ============================================================================
- * GENLOGISTICS | MOTOR DE SINCRONIZACIÓN OFFLINE-FIRST (sync-engine.js)
- * Versión: 2.0.0-OPT | Arquitectura: Headless Edge-to-GAS
- * ----------------------------------------------------------------------------
- * Responsabilidades:
- * 1. Persistencia local asíncrona en IndexedDB (Catálogos, Transacciones y Cola FIFO).
- * 2. Aislamiento transaccional estricto por client_uuid (Cero colisiones en planta).
- * 3. Compresión Edge en <canvas> (Trimming + Fondo Sólido + JPEG 0.72) para firmas.
- * 4. Watchdog anti-deadlock y despacho secuencial FIFO hacia Google Apps Script.
- * ============================================================================
+ * @fileoverview Motor de Sincronización Offline-First (IndexedDB + Outbox Queue + Edge Compression)
+ * @module SyncEngine (v1.3.2-OPT)
+ * @architecture Zero-Latency Optimistic UI & Background Worker | Anti-Poison-Pill FIFO
  */
 
 const SyncEngine = (() => {
-    // ------------------------------------------------------------------------
-    // 1. CONFIGURACIÓN DEL NÚCLEO Y CONSTANTES
-    // ------------------------------------------------------------------------
-    const DB_NAME = 'GenLogistics_EdgeDB_v2';
-    const DB_VERSION = 2;
+    const DB_NAME = 'GenLogistics_Embalajes_DB';
+    const DB_VERSION = 1;
     const STORE_CACHE = 'cache_datos';
     const STORE_QUEUE = 'sync_queue';
 
-    // Mapa canónico de tablas (alineado con code.gs y script.js)
-    const TABLAS = {
-        CLIENTES: 'MAE_CLIENTES',
-        MATERIALES: 'MAE_MATERIALES',
-        AREAS: 'MAE_AREAS',
-        CARGOS: 'CARGOS_MEMB',
-        DETALLES: 'DETALLE_CARGOS_MEMB'
+    let db = null;
+    let isSyncing = false;
+    let syncStartedAt = 0; // Watchdog anti-deadlock
+    let pollingInterval = null;
+    let config = {
+        apiUrl: '',
+        token: '',
+        onQueueChange: () => {},      // Callback para actualizar badge en UI
+        onRemoteDataSync: () => {},   // Callback cuando llegan datos frescos en segundo plano
+        onSyncError: () => {}         // Callback silencioso o de log
     };
 
-    let gasUrl = '';
-    let dbInstance = null;
-    let isSyncing = false;
-    let syncLockTimestamp = 0;
-    let pollingTimer = null;
-
-    const WATCHDOG_TIMEOUT_MS = 22000; // 22s máximo por petición antes de liberar lock
-    const POLLING_INTERVAL_MS = 30000; // Verificación cada 30s si hay cola pendiente
-
-    // ------------------------------------------------------------------------
-    // 2. INICIALIZACIÓN Y GESTIÓN DE INDEXEDDB (PROMISE WRAPPERS)
-    // ------------------------------------------------------------------------
-    function openDB() {
+    // ==========================================
+    // 1. INICIALIZACIÓN DE INDEXEDDB
+    // ==========================================
+    function initDB() {
         return new Promise((resolve, reject) => {
-            if (dbInstance) return resolve(dbInstance);
-
             const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-            request.onupgradeneeded = (event) => {
-                const db = event.target.result;
-
-                // Almacén de tablas maestras y transacciones cacheadas
-                if (!db.objectStoreNames.contains(STORE_CACHE)) {
-                    db.createObjectStore(STORE_CACHE, { keyPath: 'tabla' });
+            request.onupgradeneeded = (e) => {
+                const database = e.target.result;
+                if (!database.objectStoreNames.contains(STORE_CACHE)) {
+                    database.createObjectStore(STORE_CACHE, { keyPath: 'key' });
                 }
-
-                // Recrear cola FIFO con client_uuid como PK única (evita sobrescritura de eventos)
-                if (db.objectStoreNames.contains(STORE_QUEUE)) {
-                    db.deleteObjectStore(STORE_QUEUE);
+                if (!database.objectStoreNames.contains(STORE_QUEUE)) {
+                    // autoIncrement garantiza orden estricto FIFO
+                    const queueStore = database.createObjectStore(STORE_QUEUE, { keyPath: 'id', autoIncrement: true });
+                    queueStore.createIndex('uuid', 'uuid', { unique: true });
                 }
-                const queueStore = db.createObjectStore(STORE_QUEUE, { keyPath: 'client_uuid' });
-                queueStore.createIndex('idx_timestamp', 'timestamp', { unique: false });
-                queueStore.createIndex('idx_id_cargo', 'id_cargo', { unique: false });
             };
 
-            request.onsuccess = (event) => {
-                dbInstance = event.target.result;
-                // Manejo de cierre inesperado por limpieza del navegador
-                dbInstance.onversionchange = () => {
-                    dbInstance.close();
-                    dbInstance = null;
-                };
-                resolve(dbInstance);
+            request.onsuccess = (e) => {
+                db = e.target.result;
+                resolve(db);
             };
 
-            request.onerror = (event) => {
-                console.error('[SyncEngine] Error crítico abriendo IndexedDB:', event.target.error);
-                reject(event.target.error);
+            request.onerror = (e) => {
+                console.error('[SyncEngine] Error fatal abriendo IndexedDB:', e.target.error);
+                reject(e.target.error);
             };
         });
     }
 
-    async function init(endpointUrl) {
-        gasUrl = endpointUrl;
-        await openDB();
-
-        // Listeners nativos de conectividad del navegador
-        window.addEventListener('online', () => {
-            actualizarIndicadorRed(true);
-            processQueue();
-        });
-
-        window.addEventListener('offline', () => {
-            actualizarIndicadorRed(false);
-        });
-
-        actualizarIndicadorRed(navigator.onLine);
-
-        // Iniciar polling inteligente (solo transmite si queue.length > 0)
-        if (pollingTimer) clearInterval(pollingTimer);
-        pollingTimer = setInterval(() => {
-            if (navigator.onLine) processQueue();
-        }, POLLING_INTERVAL_MS);
-
-        // Despacho inicial si quedaron operaciones pendientes de una sesión previa
-        if (navigator.onLine) {
-            setTimeout(() => processQueue(), 1200);
-        }
-    }
-
-    // ------------------------------------------------------------------------
-    // 3. OPERACIONES DE CACHÉ LOCAL (O(1) KEY-VALUE EN INDEXEDDB)
-    // ------------------------------------------------------------------------
-    async function saveTable(nombreTabla, registros) {
-        const db = await openDB();
+    // ==========================================
+    // 2. OPERACIONES CRUD EN CACHÉ LOCAL (O(1))
+    // ==========================================
+    function saveCache(key, data) {
         return new Promise((resolve, reject) => {
+            if (!db) return reject('DB no inicializada');
             const tx = db.transaction(STORE_CACHE, 'readwrite');
             const store = tx.objectStore(STORE_CACHE);
-            store.put({
-                tabla: nombreTabla,
-                data: Array.isArray(registros) ? registros : [],
-                updated_at: Date.now()
-            });
-            tx.oncomplete = () => resolve(true);
-            tx.onerror = (e) => reject(e.target.error);
+            const request = store.put({ key, data, updatedAt: Date.now() });
+
+            request.onsuccess = () => resolve(true);
+            request.onerror = (e) => reject(e.target.error);
         });
     }
 
-    async function getLocalTable(nombreTabla) {
-        const db = await openDB();
-        return new Promise((resolve) => {
+    function getCache(key) {
+        return new Promise((resolve, reject) => {
+            if (!db) return reject('DB no inicializada');
             const tx = db.transaction(STORE_CACHE, 'readonly');
             const store = tx.objectStore(STORE_CACHE);
-            const req = store.get(nombreTabla);
-            req.onsuccess = () => resolve(req.result ? req.result.data : null);
-            req.onerror = () => resolve(null);
+            const request = store.get(key);
+
+            request.onsuccess = (e) => resolve(e.target.result ? e.target.result.data : null);
+            request.onerror = (e) => reject(e.target.error);
         });
     }
 
-    /**
-     * Obtiene una tabla priorizando IndexedDB (Latencia 0) y resolviendo
-     * automáticamente el mapeo de endpoints si se requiere fallback de red.
-     */
-    async function getTable(nombreSolicitado, forzarRed = false) {
-        // Normalizar alias ('AREAS' -> 'MAE_AREAS')
-        const nombreCanonico = TABLAS[nombreSolicitado] || nombreSolicitado;
-
-        if (!forzarRed) {
-            const localData = await getLocalTable(nombreCanonico);
-            if (localData !== null) return localData;
-        }
-
-        if (!navigator.onLine) {
-            return (await getLocalTable(nombreCanonico)) || [];
-        }
-
-        try {
-            // Determinar endpoint en GAS según el tipo de tabla
-            const esCatalogo = [TABLAS.CLIENTES, TABLAS.MATERIALES, TABLAS.AREAS].includes(nombreCanonico);
-            const action = esCatalogo ? 'getCatalogos' : 'getTransacciones';
-
-            const res = await fetch(`${gasUrl}?action=${action}&t=${Date.now()}`, {
-                method: 'GET',
-                cache: 'no-store'
-            });
-            const json = await res.json();
-
-            if (json.status === 'success' && json.data) {
-                if (esCatalogo) {
-                    await Promise.all([
-                        saveTable(TABLAS.CLIENTES, json.data.clientes || []),
-                        saveTable(TABLAS.MATERIALES, json.data.materiales || []),
-                        saveTable(TABLAS.AREAS, json.data.areas || [])
-                    ]);
-                } else {
-                    await Promise.all([
-                        saveTable(TABLAS.CARGOS, json.data.cargos || []),
-                        saveTable(TABLAS.DETALLES, json.data.detalles || [])
-                    ]);
-                }
-                return (await getLocalTable(nombreCanonico)) || [];
-            }
-        } catch (err) {
-            console.warn(`[SyncEngine] Fallback de red fallido para ${nombreCanonico}:`, err.message);
-        }
-
-        return (await getLocalTable(nombreCanonico)) || [];
-    }
-
-    /**
-     * Sincronización completa en segundo plano (Pull silencioso)
-     */
-    async function pullAllFromServer() {
-        if (!navigator.onLine) return false;
-        try {
-            const [resCat, resTx] = await Promise.all([
-                fetch(`${gasUrl}?action=getCatalogos&t=${Date.now()}`, { cache: 'no-store' }).then(r => r.json()),
-                fetch(`${gasUrl}?action=getTransacciones&t=${Date.now()}`, { cache: 'no-store' }).then(r => r.json())
-            ]);
-
-            const promesas = [];
-            if (resCat.status === 'success' && resCat.data) {
-                promesas.push(saveTable(TABLAS.CLIENTES, resCat.data.clientes || []));
-                promesas.push(saveTable(TABLAS.MATERIALES, resCat.data.materiales || []));
-                promesas.push(saveTable(TABLAS.AREAS, resCat.data.areas || []));
-            }
-            if (resTx.status === 'success' && resTx.data) {
-                promesas.push(saveTable(TABLAS.CARGOS, resTx.data.cargos || []));
-                promesas.push(saveTable(TABLAS.DETALLES, resTx.data.detalles || []));
-            }
-
-            await Promise.all(promesas);
-            return true;
-        } catch (e) {
-            console.warn('[SyncEngine] Pull silencioso omitido por inestabilidad de red.');
-            return false;
-        }
-    }
-
-    // ------------------------------------------------------------------------
-    // 4. COLA FIFO DE MUTACIONES (FIRE AND FORGET)
-    // ------------------------------------------------------------------------
-    function generarUUID() {
-        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    // ==========================================
+    // 3. GESTIÓN DE COLA OUTBOX (FIFO)
+    // ==========================================
+    function generateUUID() {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
             return crypto.randomUUID();
         }
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-            const r = (Math.random() * 16) | 0;
-            const v = c === 'x' ? r : (r & 0x3) | 0x8;
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
             return v.toString(16);
         });
     }
 
-    /**
-     * Encola una mutación garantizando unicidad por client_uuid.
-     * Permite encadenar múltiples acciones sobre un mismo id_cargo sin colisión.
-     */
-    async function enqueue(action, payload) {
-        const db = await openDB();
-        const uuid = payload.client_uuid || generarUUID();
-        const enrichedPayload = { ...payload, client_uuid: uuid };
-
-        const item = {
-            client_uuid: uuid,
-            id_cargo: payload.id_cargo || 'N/A',
-            action: action,
-            payload: enrichedPayload,
-            timestamp: Date.now(),
-            retries: 0
-        };
-
-        await new Promise((resolve, reject) => {
+    async function enqueueMutation(action, payload) {
+        return new Promise((resolve, reject) => {
+            if (!db) return reject('DB no inicializada');
             const tx = db.transaction(STORE_QUEUE, 'readwrite');
             const store = tx.objectStore(STORE_QUEUE);
-            store.put(item);
-            tx.oncomplete = () => resolve(true);
-            tx.onerror = (e) => reject(e.target.error);
+
+            const item = {
+                uuid: generateUUID(),
+                action: action,
+                payload: payload,
+                timestamp: Date.now(),
+                retries: 0
+            };
+
+            const request = store.add(item);
+
+            request.onsuccess = async () => {
+                await notifyQueueStatus();
+                // Disparar sincronización inmediata (Fire & Forget)
+                processQueue();
+                resolve(item.uuid);
+            };
+            request.onerror = (e) => reject(e.target.error);
         });
-
-        await actualizarBadgeCola();
-
-        // Disparo inmediato no bloqueante si hay conexión
-        if (navigator.onLine) {
-            processQueue();
-        }
-
-        return uuid;
     }
 
-    async function getPendingItems() {
-        const db = await openDB();
+    function getQueueItems() {
         return new Promise((resolve) => {
+            if (!db) return resolve([]);
             const tx = db.transaction(STORE_QUEUE, 'readonly');
             const store = tx.objectStore(STORE_QUEUE);
-            const index = store.index('idx_timestamp');
-            const req = index.getAll();
-            req.onsuccess = () => resolve(req.result || []);
-            req.onerror = () => resolve([]);
+            const request = store.getAll();
+
+            request.onsuccess = (e) => resolve(e.target.result || []);
+            request.onerror = () => resolve([]);
         });
     }
 
-    async function removeQueueItem(clientUuid) {
-        const db = await openDB();
-        return new Promise((resolve) => {
+    function removeQueueItem(id) {
+        return new Promise((resolve, reject) => {
             const tx = db.transaction(STORE_QUEUE, 'readwrite');
-            tx.objectStore(STORE_QUEUE).delete(clientUuid);
-            tx.oncomplete = () => resolve(true);
-            tx.onerror = () => resolve(false);
+            const store = tx.objectStore(STORE_QUEUE);
+            const request = store.delete(id);
+
+            request.onsuccess = () => resolve(true);
+            request.onerror = (e) => reject(e.target.error);
         });
     }
 
-    async function updateQueueItemRetry(item) {
-        const db = await openDB();
-        return new Promise((resolve) => {
-            const tx = db.transaction(STORE_QUEUE, 'readwrite');
-            tx.objectStore(STORE_QUEUE).put(item);
-            tx.oncomplete = () => resolve(true);
-            tx.onerror = () => resolve(false);
-        });
+    async function notifyQueueStatus() {
+        const items = await getQueueItems();
+        config.onQueueChange(items.length, navigator.onLine);
     }
 
-    /**
-     * Procesa la cola FIFO secuencialmente para respetar dependencias causales
-     * (Ej. Crear Cargo antes de Descargarlo). Incluye Watchdog anti-deadlock.
-     */
-    async function processQueue() {
-        if (!navigator.onLine || !gasUrl) return;
+    // Reconcilia IDs temporales (LOC-*) en caché tras respuesta exitosa de GAS
+    async function reconcileServerIds(action, resultData) {
+        if (!resultData || typeof resultData !== 'object') return;
 
-        // Watchdog: si el lock lleva más de 22s activo, se asume hilo colgado y se libera
-        if (isSyncing) {
-            if (Date.now() - syncLockTimestamp > WATCHDOG_TIMEOUT_MS) {
-                console.warn('[SyncEngine] Watchdog activado: liberando lock de sincronización.');
-                isSyncing = false;
-            } else {
-                return;
+        if (action === 'saveCargo' && resultData.localIdRef && resultData.idCargo) {
+            const cargos = await getCache('cargosActivos');
+            if (Array.isArray(cargos)) {
+                const target = cargos.find(c => c.idCargo === resultData.localIdRef);
+                if (target) {
+                    target.idCargo = resultData.idCargo;
+                    target.isLocalSyncPending = false;
+                    await saveCache('cargosActivos', cargos);
+                }
             }
         }
 
-        const pendientes = await getPendingItems();
-        if (pendientes.length === 0) {
-            await actualizarBadgeCola();
+        if (action === 'addDetalleCargo' && resultData.localDetalleRef && resultData.idDetalle) {
+            const cargos = await getCache('cargosActivos');
+            if (Array.isArray(cargos)) {
+                for (const c of cargos) {
+                    const det = (c.detalles || []).find(d => d.ID_DETALLE === resultData.localDetalleRef);
+                    if (det) {
+                        det.ID_DETALLE = resultData.idDetalle;
+                        await saveCache('cargosActivos', cargos);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // ==========================================
+    // 4. WORKER DE SINCRONIZACIÓN (PUSH & PULL)
+    // ==========================================
+    async function processQueue() {
+        // Watchdog: liberar lock si excedió 25s por microcorte de red
+        if (isSyncing && (Date.now() - syncStartedAt > 25000)) {
+            console.warn('[SyncEngine] Liberando lock de sincronización por timeout (>25s).');
+            isSyncing = false;
+        }
+
+        if (isSyncing || !navigator.onLine) {
+            await notifyQueueStatus();
+            return;
+        }
+
+        const queue = await getQueueItems();
+        if (queue.length === 0) {
+            await notifyQueueStatus();
             return;
         }
 
         isSyncing = true;
-        syncLockTimestamp = Date.now();
-        actualizarIndicadorSincronizando(true);
+        syncStartedAt = Date.now();
+        await notifyQueueStatus();
 
-        let huboCambiosRemotos = false;
+        for (const item of queue) {
+            if (!navigator.onLine) break;
 
-        try {
-            // Orden estricto FIFO por timestamp
-            pendientes.sort((a, b) => a.timestamp - b.timestamp);
+            try {
+                const bodyPayload = {
+                    action: item.action,
+                    token: config.token,
+                    client_uuid: item.uuid,
+                    ...item.payload
+                };
 
-            for (const item of pendientes) {
-                if (!navigator.onLine) break;
+                const response = await fetch(config.apiUrl, {
+                    method: 'POST',
+                    redirect: 'follow',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(bodyPayload)
+                });
 
-                syncLockTimestamp = Date.now(); // Renovar pulso del watchdog por ítem
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 18000);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
 
-                try {
-                    const response = await fetch(gasUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // Evita preflight OPTIONS en GAS
-                        body: JSON.stringify({
-                            action: item.action,
-                            ...item.payload
-                        }),
-                        signal: controller.signal
-                    });
+                if (result.status === 'success') {
+                    await reconcileServerIds(item.action, result.data);
+                    await removeQueueItem(item.id);
+                    await notifyQueueStatus();
+                } else {
+                    const msg = String(result.message || 'Error desconocido');
+                    console.error(`[SyncEngine] Rechazo del servidor en ${item.action}:`, msg);
 
-                    clearTimeout(timeoutId);
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}`);
+                    // Si el servidor estaba ocupado por LockService, detener y reintentar luego
+                    if (msg.toLowerCase().includes('servidor ocupado')) {
+                        break;
                     }
 
-                    const result = await response.json();
-
-                    if (result.status === 'success') {
-                        await removeQueueItem(item.client_uuid);
-                        huboCambiosRemotos = true;
-                    } else {
-                        // Error lógico controlado por GAS (ej. duplicado o estado inválido)
-                        console.warn(`[SyncEngine] GAS rechazó ${item.action} (${item.client_uuid}):`, result.message);
-                        // Si ya fue procesado o es irrecuperable tras 5 intentos, purgar para no atascar la cola FIFO
-                        item.retries = (item.retries || 0) + 1;
-                        if (item.retries >= 5 || (result.message && result.message.includes('ya registrado'))) {
-                            await removeQueueItem(item.client_uuid);
-                        } else {
-                            await updateQueueItemRetry(item);
-                            break; // Detener avance FIFO hasta resolver dependencia
-                        }
-                    }
-                } catch (netErr) {
-                    clearTimeout(timeoutId);
-                    console.warn(`[SyncEngine] Error de red enviando ${item.client_uuid}:`, netErr.message);
-                    item.retries = (item.retries || 0) + 1;
-                    await updateQueueItemRetry(item);
-                    break; // Abortar ciclo FIFO para mantener orden causal
+                    // Error lógico/permiso (Zero-Trust o fila inexistente): purgar para no bloquear cola FIFO
+                    config.onSyncError(msg, item);
+                    await removeQueueItem(item.id);
+                    await notifyQueueStatus();
                 }
+            } catch (networkErr) {
+                console.warn('[SyncEngine] Microcorte de red durante Push:', networkErr);
+                break;
             }
-        } finally {
-            isSyncing = false;
-            actualizarIndicadorSincronizando(false);
-            await actualizarBadgeCola();
+        }
 
-            // Si se sincronizaron mutaciones, notificar a la UI para refrescar estado desde servidor
-            if (huboCambiosRemotos) {
-                await pullAllFromServer();
-                window.dispatchEvent(new CustomEvent('genlogistics:sync-completed'));
-            }
+        isSyncing = false;
+        syncStartedAt = 0;
+        await notifyQueueStatus();
+
+        const remaining = await getQueueItems();
+        if (remaining.length === 0 && navigator.onLine) {
+            await pullLatestState(false);
         }
     }
 
-    // ------------------------------------------------------------------------
-    // 5. PROCESAMIENTO EDGE DE FIRMAS (TRIM + FONDO SÓLIDO + JPEG COMPRESSION)
-    // ------------------------------------------------------------------------
-    /**
-     * Recorta el espacio vacío alrededor del trazo, redimensiona a máximo 520px
-     * y exporta en JPEG sobre fondo blanco sólido (< 8KB) para transmisión ultra rápida.
-     */
-    function compressSignatureCanvas(sourceCanvas, maxWidth = 520, quality = 0.72) {
-        if (!sourceCanvas) return '';
+    async function pullLatestState(force = false) {
+        if (!navigator.onLine) {
+            if (force) throw new Error("Sin conexión a internet.");
+            return false;
+        }
 
-        const ctx = sourceCanvas.getContext('2d', { willReadFrequently: true });
+        if (!force) {
+            const pending = await getQueueItems();
+            if (pending.length > 0 || isSyncing) return false;
+        } else {
+            const pending = await getQueueItems();
+            if (pending.length > 0) {
+                await processQueue();
+                const stillPending = await getQueueItems();
+                if (stillPending.length > 0) {
+                    throw new Error(`Hay ${stillPending.length} registro(s) local(es) sin poder subirse. Revisa tu conexión.`);
+                }
+            }
+        }
+
+        try {
+            const bust = `_t=${Date.now()}`;
+            const tokenParam = encodeURIComponent(config.token);
+            const noCacheParam = force ? '&nocache=1' : '';
+
+            const [resCargos, resHistory] = await Promise.all([
+                fetch(`${config.apiUrl}?action=getActiveCargos&token=${tokenParam}&${bust}${noCacheParam}`, {
+                    method: 'GET',
+                    redirect: 'follow',
+                    cache: 'no-store'
+                }),
+                fetch(`${config.apiUrl}?action=getHistory&token=${tokenParam}&${bust}${noCacheParam}`, {
+                    method: 'GET',
+                    redirect: 'follow',
+                    cache: 'no-store'
+                })
+            ]);
+
+            if (!resCargos.ok || !resHistory.ok) {
+                throw new Error(`HTTP Error (${resCargos.status} / ${resHistory.status})`);
+            }
+
+            const jsonCargos = await resCargos.json();
+            const jsonHistory = await resHistory.json();
+
+            if (jsonCargos.status === 'error') throw new Error(jsonCargos.message);
+            if (jsonHistory.status === 'error') throw new Error(jsonHistory.message);
+
+            if (jsonCargos.status === 'success' && Array.isArray(jsonCargos.data)) {
+                await saveCache('cargosActivos', jsonCargos.data);
+            }
+            if (jsonHistory.status === 'success' && Array.isArray(jsonHistory.data)) {
+                await saveCache('historial', jsonHistory.data);
+            }
+
+            config.onRemoteDataSync({
+                cargosActivos: jsonCargos.status === 'success' ? jsonCargos.data : null,
+                historial: jsonHistory.status === 'success' ? jsonHistory.data : null
+            });
+
+            return true;
+        } catch (err) {
+            if (force) throw err;
+            console.debug('[SyncEngine] Background pull omitido:', err.message);
+            return false;
+        }
+    }
+
+    // ==========================================
+    // 5. COMPRESIÓN EDGE PARA FIRMAS (CANVAS)
+    // ==========================================
+    function compressSignature(sourceCanvas) {
+        const ctx = sourceCanvas.getContext('2d');
         const width = sourceCanvas.width;
         const height = sourceCanvas.height;
         const imgData = ctx.getImageData(0, 0, width, height).data;
@@ -413,106 +338,87 @@ const SyncEngine = (() => {
         let minX = width, minY = height, maxX = 0, maxY = 0;
         let hasPixels = false;
 
-        // Escaneo rápido de bounding box de píxeles no transparentes
+        // Detectar Bounding Box real del trazo para recortar espacio vacío
         for (let y = 0; y < height; y++) {
-            const rowOffset = y * width * 4;
             for (let x = 0; x < width; x++) {
-                if (imgData[rowOffset + x * 4 + 3] > 15) {
+                const alpha = imgData[(y * width + x) * 4 + 3];
+                if (alpha > 0) {
+                    hasPixels = true;
                     if (x < minX) minX = x;
                     if (x > maxX) maxX = x;
                     if (y < minY) minY = y;
                     if (y > maxY) maxY = y;
-                    hasPixels = true;
                 }
             }
         }
 
-        if (!hasPixels) return '';
+        if (!hasPixels) return null;
 
-        // Margen de seguridad de 12px alrededor de la firma
-        const pad = 12;
+        // Añadir margen de seguridad de 10px
+        const pad = 10;
         minX = Math.max(0, minX - pad);
         minY = Math.max(0, minY - pad);
         maxX = Math.min(width, maxX + pad);
         maxY = Math.min(height, maxY + pad);
 
-        const trimW = Math.max(1, maxX - minX);
-        const trimH = Math.max(1, maxY - minY);
+        const cropW = maxX - minX;
+        const cropH = maxY - minY;
 
-        // Escalado proporcional si excede maxWidth
-        const scale = trimW > maxWidth ? maxWidth / trimW : 1;
-        const targetW = Math.round(trimW * scale);
-        const targetH = Math.round(trimH * scale);
+        // Escalar a máximo 400px de ancho manteniendo proporción
+        const maxWidth = 400;
+        const scale = cropW > maxWidth ? maxWidth / cropW : 1;
 
         const offscreen = document.createElement('canvas');
-        offscreen.width = targetW;
-        offscreen.height = targetH;
+        offscreen.width = Math.round(cropW * scale);
+        offscreen.height = Math.round(cropH * scale);
 
         const offCtx = offscreen.getContext('2d');
-        // Fondo blanco puro obligatorio antes de convertir a JPEG (evita fondo negro por canal alfa)
-        offCtx.fillStyle = '#FFFFFF';
-        offCtx.fillRect(0, 0, targetW, targetH);
-        offCtx.drawImage(sourceCanvas, minX, minY, trimW, trimH, 0, 0, targetW, targetH);
+        offCtx.drawImage(sourceCanvas, minX, minY, cropW, cropH, 0, 0, offscreen.width, offscreen.height);
 
-        return offscreen.toDataURL('image/jpeg', quality);
+        // Retorna PNG recortado (~4KB - 8KB frente a los ~60KB originales)
+        return offscreen.toDataURL('image/png');
     }
 
-    // ------------------------------------------------------------------------
-    // 6. TELEMETRÍA VISUAL NO INTRUSIVA (BADGES DE ESTADO)
-    // ------------------------------------------------------------------------
-    async function actualizarBadgeCola() {
-        const pendientes = await getPendingItems();
-        const badge = document.getElementById('sync-queue-badge');
-        const countEl = document.getElementById('sync-queue-count');
-        if (!badge || !countEl) return;
+    // ==========================================
+    // 6. INICIALIZADOR PÚBLICO Y EVENT LISTENERS
+    // ==========================================
+    async function init(userConfig) {
+        config = { ...config, ...userConfig };
+        await initDB();
 
-        if (pendientes.length > 0) {
-            countEl.textContent = pendientes.length;
-            badge.classList.remove('hidden');
-            badge.classList.add('flex');
-        } else {
-            badge.classList.add('hidden');
-            badge.classList.remove('flex');
-        }
+        window.addEventListener('online', () => {
+            console.info('[SyncEngine] Conexión restaurada. Ejecutando sincronización...');
+            processQueue();
+        });
+
+        window.addEventListener('offline', () => {
+            console.warn('[SyncEngine] Modo Offline activado.');
+            notifyQueueStatus();
+        });
+
+        if (pollingInterval) clearInterval(pollingInterval);
+        pollingInterval = setInterval(() => {
+            if (!navigator.onLine) return;
+            getQueueItems().then(items => {
+                if (items.length > 0) processQueue();
+                else pullLatestState(false);
+            });
+        }, 30000);
+
+        await notifyQueueStatus();
+
+        if (navigator.onLine) processQueue();
     }
 
-    function actualizarIndicadorRed(online) {
-        const dot = document.getElementById('network-status-dot');
-        const text = document.getElementById('network-status-text');
-        if (!dot || !text) return;
-
-        if (online) {
-            dot.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
-            text.textContent = 'En línea';
-        } else {
-            dot.className = 'w-2 h-2 rounded-full bg-amber-500';
-            text.textContent = 'Modo Offline';
-        }
-    }
-
-    function actualizarIndicadorSincronizando(syncing) {
-        const spinner = document.getElementById('sync-spinner-icon');
-        if (!spinner) return;
-        if (syncing) {
-            spinner.classList.remove('hidden');
-        } else {
-            spinner.classList.add('hidden');
-        }
-    }
-
-    // ------------------------------------------------------------------------
-    // API PÚBLICA DEL MÓDULO
-    // ------------------------------------------------------------------------
     return {
-        TABLAS,
         init,
-        getTable,
-        saveTable,
-        pullAllFromServer,
-        enqueue,
+        saveCache,
+        getCache,
+        enqueueMutation,
+        getQueue: getQueueItems,
+        getQueueItems,
         processQueue,
-        getPendingItems,
-        compressSignatureCanvas,
-        generarUUID
+        pullLatestState,
+        compressSignature
     };
 })();
