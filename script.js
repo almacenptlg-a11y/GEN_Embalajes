@@ -1,17 +1,17 @@
 /**
  * @fileoverview Controlador Frontend & UI Optimista - GenLogistics Embalajes
- * @version 1.4.0
+ * @version 1.4.1 (100% Alineado a DOM index_3.html + SyncEngine v1.4.0)
  * @architecture Zero-Latency Optimistic UI | Offline-First IndexedDB | Single Source of Truth
  */
 
 // ==========================================
 // 1. CONFIGURACIÓN GLOBAL Y ESTADO REACTIVO
 // ==========================================
-const API_URL = "https://script.google.com/macros/s/AKfycby8v3690-wU2hY9W-H2kI46uA-p_lV23qS-7b6mB7P18zX2qK4p4_vM6iN_e8q_p3A/exec";
+const API_URL = "https://script.google.com/macros/s/AKfycbz-n25x1G69pP9k-Y95T6Q8B2N95i1W5S_1w86E2b8W8n2w8w90k5F1y4q3m9E1B5/exec"; // ⚠️ Verifica que coincida con tu URL de despliegue GAS actual
 const API_TOKEN = "GEN_EMB_2026_SECURE_KEY";
 
 const AppState = {
-  usuario: null,        // { nombre: string, rol: string }
+  usuario: null,         // { id: string, nombre: string, rol: string }
   choferes: [],
   vehiculos: [],
   destinos: [],
@@ -19,6 +19,7 @@ const AppState = {
   cargosActivos: [],
   historial: [],
   cargoSeleccionado: null,
+  tabActual: 'nuevo',
   filtroHistorial: 'todos',
   busquedaHistorial: '',
   busquedaActivos: ''
@@ -57,6 +58,7 @@ function escapeHTML(str) {
     .replace(/</g, '<')
     .replace(/>/g, '>')
     .replace(/"/g, '"')
+    .replace(/'/g, ''');
 }
 
 function resolverNombreChofer(idOrName) {
@@ -119,10 +121,6 @@ function obtenerCargoUnificado(idCargo) {
   };
 }
 
-/**
- * Sincroniza AppState.cargosActivos tras cualquier mutación optimista en un cargo
- * y persiste ambos stores en IndexedDB en O(1).
- */
 async function recalcularEstadoCargoOptimista(cargo) {
   if (!cargo) return;
   cargo.tieneDeuda = cargo.detalles.some(d => {
@@ -147,7 +145,7 @@ async function recalcularEstadoCargoOptimista(cargo) {
 }
 
 // ==========================================
-// 3. NOTIFICACIONES TOAST & ESTADO DE RED
+// 3. NOTIFICACIONES TOAST & ESTADO DE RED (EXACTO A index_3.html)
 // ==========================================
 function mostrarToast(mensaje, tipo = 'info') {
   const container = document.getElementById('toastContainer');
@@ -165,9 +163,7 @@ function mostrarToast(mensaje, tipo = 'info') {
   toast.innerHTML = `<span>${escapeHTML(mensaje)}</span>`;
   container.appendChild(toast);
 
-  requestAnimationFrame(() => {
-    toast.classList.remove('translate-y-2', 'opacity-0');
-  });
+  requestAnimationFrame(() => toast.classList.remove('translate-y-2', 'opacity-0'));
 
   setTimeout(() => {
     toast.classList.add('opacity-0', 'translate-y-2');
@@ -176,18 +172,32 @@ function mostrarToast(mensaje, tipo = 'info') {
 }
 
 function actualizarIndicadorRed(pendingCount, isOnline) {
-  const badge = document.getElementById('syncStatusBadge');
-  if (!badge) return;
+  const pill = document.getElementById('estadoConexion');
+  const dot = document.getElementById('dotConexion');
+  const txt = document.getElementById('txtConexion');
+  const syncBadge = document.getElementById('syncBadge');
+  const syncCount = document.getElementById('syncCount');
+
+  if (syncBadge && syncCount) {
+    syncCount.textContent = pendingCount;
+    if (pendingCount > 0) syncBadge.classList.remove('hidden');
+    else syncBadge.classList.add('hidden');
+  }
+
+  if (!pill || !dot || !txt) return;
 
   if (!isOnline) {
-    badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300';
-    badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500"></span> Offline (${pendingCount} en cola)`;
+    pill.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 transition-colors';
+    dot.className = 'w-2 h-2 rounded-full bg-amber-500';
+    txt.textContent = 'Offline (Local)';
   } else if (pendingCount > 0) {
-    badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-300';
-    badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-blue-600 animate-ping"></span> Sincronizando (${pendingCount})`;
+    pill.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 transition-colors';
+    dot.className = 'w-2 h-2 rounded-full bg-blue-500 animate-ping';
+    txt.textContent = `Subiendo (${pendingCount})`;
   } else {
-    badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300';
-    badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span> En línea`;
+    pill.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 transition-colors';
+    dot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+    txt.textContent = 'En línea';
   }
 }
 
@@ -200,6 +210,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   inicializarCanvasFirma();
   configurarEventosUI();
 
+  // Forzar actualización inmediata del indicador de red antes de que responda GAS
+  actualizarIndicadorRed(0, navigator.onLine);
+
   await SyncEngine.init({
     apiUrl: API_URL,
     token: API_TOKEN,
@@ -209,7 +222,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (Array.isArray(historial)) AppState.historial = historial;
       renderizarTodo();
 
-      // Si el modal de detalle está abierto, refrescar sus líneas con la versión consolidada
       if (AppState.cargoSeleccionado) {
         const actualizado = obtenerCargoUnificado(AppState.cargoSeleccionado.idCargo);
         if (actualizado) {
@@ -243,15 +255,15 @@ function inicializarSesion() {
     }
   }
   if (!AppState.usuario) {
-    document.getElementById('modalLogin')?.classList.remove('hidden');
+    document.getElementById('modalSesion')?.classList.remove('hidden');
   }
 }
 
 function actualizarHeaderUsuario() {
-  const elNombre = document.getElementById('userNombreDisplay');
-  const elRol = document.getElementById('userRolDisplay');
-  if (elNombre && AppState.usuario) elNombre.textContent = AppState.usuario.nombre;
-  if (elRol && AppState.usuario) elRol.textContent = AppState.usuario.rol;
+  const txtNombre = document.getElementById('txtGestorActivo');
+  const txtRol = document.getElementById('txtRolActivo');
+  if (txtNombre && AppState.usuario) txtNombre.textContent = AppState.usuario.nombre;
+  if (txtRol && AppState.usuario) txtRol.textContent = AppState.usuario.rol;
 }
 
 async function cargarDatosIniciales() {
@@ -275,6 +287,7 @@ async function cargarDatosIniciales() {
         redirect: 'follow',
         cache: 'no-store'
       });
+      if (!resInit.ok) throw new Error(`HTTP ${resInit.status}`);
       const jsonInit = await resInit.json();
       if (jsonInit.status === 'success' && jsonInit.data) {
         aplicarInitData(jsonInit.data);
@@ -282,7 +295,7 @@ async function cargarDatosIniciales() {
       }
       await SyncEngine.pullLatestState(false);
     } catch (err) {
-      console.debug('[Init] Operando con caché local IndexedDB:', err.message);
+      console.warn('[Init] Error conectando con GAS (usando caché local):', err.message);
     }
   }
 }
@@ -300,12 +313,11 @@ function aplicarInitData(data) {
 // ==========================================
 window.forzarSincronizacionManual = async function () {
   const btn = document.getElementById('btnForceSync');
-  const icon = btn?.querySelector('svg');
+  const icon = document.getElementById('iconForceSync') || btn?.querySelector('svg');
   if (btn) btn.disabled = true;
   if (icon) icon.classList.add('animate-spin');
 
   try {
-    // Descargar catálogos frescos (bypass caché GAS) + estado operativo
     const tokenParam = encodeURIComponent(API_TOKEN);
     const resInit = await fetch(`${API_URL}?action=getInitData&token=${tokenParam}&nocache=1&_t=${Date.now()}`, {
       redirect: 'follow',
@@ -318,7 +330,7 @@ window.forzarSincronizacionManual = async function () {
     }
 
     await SyncEngine.pullLatestState(true);
-    mostrarToast('Datos sincronizados con Google Sheets.', 'success');
+    mostrarToast('Sincronizado con Google Sheets.', 'success');
   } catch (err) {
     mostrarToast(err.message || 'No se pudo completar la sincronización.', 'warning');
   } finally {
@@ -333,12 +345,24 @@ window.forzarSincronizacionManual = async function () {
 function poblarSelectores() {
   const selChofer = document.getElementById('selectChofer');
   const selVehiculo = document.getElementById('selectVehiculo');
+  const selGestor = document.getElementById('selectGestorSesion');
+  const selExtraMat = document.getElementById('extraMaterialSelect');
+  const selExtraDest = document.getElementById('extraDestinoSelect');
 
   if (selChofer) {
     selChofer.innerHTML = '<option value="">Seleccione Chofer / Responsable...</option>' +
       AppState.choferes.map(c => {
         const id = String(c.ID_CHFR || '').replace(/^'+/, '').trim();
         return `<option value="${escapeHTML(id)}">${escapeHTML(c.NOMBRE)} (${escapeHTML(id)})</option>`;
+      }).join('');
+  }
+
+  if (selGestor) {
+    selGestor.innerHTML = '<option value="">Seleccione su nombre...</option>' +
+      AppState.choferes.map(c => {
+        const nombre = String(c.NOMBRE || '').trim();
+        const rol = String(c.ROL || c.CARGO || 'OPERADOR').trim();
+        return `<option value="${escapeHTML(nombre)}" data-rol="${escapeHTML(rol)}">${escapeHTML(nombre)}</option>`;
       }).join('');
   }
 
@@ -350,7 +374,9 @@ function poblarSelectores() {
       }).join('');
   }
 
-  // Inicializar primera fila de material si la tabla está vacía
+  if (selExtraMat) selExtraMat.innerHTML = generarOpcionesMaterial();
+  if (selExtraDest) selExtraDest.innerHTML = generarOpcionesDestino();
+
   const tbody = document.getElementById('tablaMaterialesBody');
   if (tbody && tbody.children.length === 0) {
     agregarFilaMaterial();
@@ -358,7 +384,7 @@ function poblarSelectores() {
 }
 
 function generarOpcionesMaterial() {
-  return '<option value="">Material...</option>' +
+  return '<option value="">Seleccione material...</option>' +
     AppState.materiales.map(m => {
       const id = String(m.ID_MEMB || '').trim();
       return `<option value="${escapeHTML(id)}">${escapeHTML(m.DESCRIPCION || id)}</option>`;
@@ -366,7 +392,7 @@ function generarOpcionesMaterial() {
 }
 
 function generarOpcionesDestino() {
-  return '<option value="">Destino / Cliente...</option>' +
+  return '<option value="">Seleccione destino...</option>' +
     AppState.destinos.map(d => {
       const nombre = String(d.DESTINO || d.NOMBRE || d.ID_DEST || '').trim();
       return `<option value="${escapeHTML(nombre)}">${escapeHTML(nombre)}</option>`;
@@ -390,10 +416,10 @@ function agregarFilaMaterial() {
         ${generarOpcionesDestino()}
       </select>
     </td>
-    <td class="p-2 w-28">
+    <td class="p-2 w-24 sm:w-28">
       <input type="number" min="1" step="1" placeholder="0" class="cant-input w-full rounded-lg border-slate-300 text-sm text-center font-semibold focus:ring-blue-500 focus:border-blue-500" required />
     </td>
-    <td class="p-2 w-12 text-center">
+    <td class="p-2 w-10 text-center">
       <button type="button" class="btn-remove-row text-slate-400 hover:text-rose-600 p-1.5 rounded-lg transition-colors" title="Quitar fila">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
@@ -469,7 +495,7 @@ function inicializarCanvasFirma() {
 async function handleFormSubmit(e) {
   e.preventDefault();
   if (!AppState.usuario) {
-    document.getElementById('modalLogin')?.classList.remove('hidden');
+    document.getElementById('modalSesion')?.classList.remove('hidden');
     return;
   }
 
@@ -493,25 +519,22 @@ async function handleFormSubmit(e) {
   const timestamp = ahoraLimaStr();
   const localId = `LOCAL-${Date.now().toString().slice(-6)}`;
 
-  const detallesOptimistas = materiales.map((item, idx) => {
-    const idDet = `${localId}-L${String(idx + 1).padStart(3, '0')}`;
-    return {
-      ID_DETALLE: idDet,
-      ID_CARGO: localId,
-      MATERIAL: item.id_memb,
-      LLEVA: item.cantidad,
-      DEVUELVE: 0,
-      DEUDA: item.cantidad,
-      ESTADO: 'Pendiente',
-      EMISOR: area,
-      DESTINO: item.destino,
-      'HORA CARGO': timestamp,
-      'GESTOR CARGO': AppState.usuario.nombre,
-      'HORA DESCARGO': '',
-      'GESTOR DESCARGO': '',
-      RESPONSABLE: chofer
-    };
-  });
+  const detallesOptimistas = materiales.map((item, idx) => ({
+    ID_DETALLE: `${localId}-L${String(idx + 1).padStart(3, '0')}`,
+    ID_CARGO: localId,
+    MATERIAL: item.id_memb,
+    LLEVA: item.cantidad,
+    DEVUELVE: 0,
+    DEUDA: item.cantidad,
+    ESTADO: 'Pendiente',
+    EMISOR: area,
+    DESTINO: item.destino,
+    'HORA CARGO': timestamp,
+    'GESTOR CARGO': AppState.usuario.nombre,
+    'HORA DESCARGO': '',
+    'GESTOR DESCARGO': '',
+    RESPONSABLE: chofer
+  }));
 
   const nuevoCargoOptimista = {
     idCargo: localId,
@@ -526,7 +549,6 @@ async function handleFormSubmit(e) {
     tieneDeuda: true
   };
 
-  // 1. Actualizar estado en memoria y caché IndexedDB instantáneamente
   AppState.cargosActivos.unshift(nuevoCargoOptimista);
   detallesOptimistas.slice().reverse().forEach(d => {
     AppState.historial.unshift({
@@ -553,7 +575,6 @@ async function handleFormSubmit(e) {
     SyncEngine.saveCache('historial', AppState.historial)
   ]);
 
-  // 2. Encolar mutación en SyncEngine (Fire & Forget)
   await SyncEngine.enqueueMutation('saveCargo', {
     data: {
       localIdRef: localId,
@@ -566,7 +587,6 @@ async function handleFormSubmit(e) {
     }
   });
 
-  // 3. Resetear formulario y actualizar UI al instante
   e.target.reset();
   const tbody = document.getElementById('tablaMaterialesBody');
   if (tbody) {
@@ -584,7 +604,7 @@ async function handleFormSubmit(e) {
 // ==========================================
 // 9. MODAL DE DETALLE, LIQUIDACIÓN Y EDICIÓN
 // ==========================================
-function abrirDetalle(idCargo) {
+window.abrirDetalle = function (idCargo) {
   const cargo = obtenerCargoUnificado(idCargo);
   if (!cargo) {
     mostrarToast('No se encontró el detalle del cargo solicitado.', 'error');
@@ -594,7 +614,7 @@ function abrirDetalle(idCargo) {
   AppState.cargoSeleccionado = cargo;
   renderizarDetalleModal(cargo);
   document.getElementById('modalDetalleCargo')?.classList.remove('hidden');
-}
+};
 
 function renderizarDetalleModal(cargo) {
   const titulo = document.getElementById('modalCargoTitulo');
@@ -632,8 +652,7 @@ function renderizarDetalleModal(cargo) {
         <td class="p-2.5 w-24">
           <input type="number" min="0" value="${pendiente > 0 ? pendiente : 0}"
             class="input-devolver w-full rounded-lg border-slate-300 text-sm text-center font-semibold"
-            data-id-detalle="${escapeHTML(det.ID_DETALLE)}"
-            ${pendiente === 0 ? 'placeholder="0"' : ''} />
+            data-id-detalle="${escapeHTML(det.ID_DETALLE)}" />
         </td>
         <td class="p-2.5 text-right whitespace-nowrap">
           ${puedeEditar ? `
@@ -684,7 +703,6 @@ async function procesarLiquidacionModal() {
     det['HORA DESCARGO'] = now;
     det['GESTOR DESCARGO'] = AppState.usuario.nombre;
 
-    // Actualizar espejo en AppState.historial
     const hItem = AppState.historial.find(h => h.idDetalle === idDetalle);
     if (hItem) {
       hItem.devuelve = nuevoDev;
@@ -911,7 +929,6 @@ window.eliminarLineaDetalle = async function (idCargo, idDetalle) {
 
   renderizarTodo();
 
-  // Cerrar modal si el cargo quedó sin líneas o ya no tiene deuda pendiente
   if (cargo.detalles.length === 0 || !cargo.tieneDeuda) {
     cerrarModalDetalle();
     mostrarToast('Línea eliminada. Cargo actualizado.', 'success');
@@ -953,8 +970,23 @@ function cerrarModalDetalle() {
 }
 
 // ==========================================
-// 10. RENDERIZADO DE VISTAS Y COMPROBANTE
+// 10. NAVEGACIÓN DE PESTAÑAS Y RENDERIZADO
 // ==========================================
+window.cambiarTab = function (tab) {
+  AppState.tabActual = tab;
+  ['nuevo', 'activos', 'historial'].forEach(t => {
+    const panel = document.getElementById(`panel-${t}`);
+    const btn = document.getElementById(`tab-${t}`);
+    if (panel) panel.classList.toggle('hidden', t !== tab);
+    if (btn) {
+      btn.classList.toggle('border-blue-600', t === tab);
+      btn.classList.toggle('text-blue-600', t === tab);
+      btn.classList.toggle('border-transparent', t !== tab);
+      btn.classList.toggle('text-slate-500', t !== tab);
+    }
+  });
+};
+
 function renderizarTodo() {
   renderizarCargosActivos();
   renderizarHistorial();
@@ -964,7 +996,9 @@ function renderizarTodo() {
 function actualizarKPIs() {
   const elActivos = document.getElementById('kpiCargosActivos');
   const elBandejas = document.getElementById('kpiBandejasCalle');
+  const badgeActivos = document.getElementById('badgeActivosCount');
   if (elActivos) elActivos.textContent = AppState.cargosActivos.length;
+  if (badgeActivos) badgeActivos.textContent = AppState.cargosActivos.length;
   if (elBandejas) {
     const totalDeuda = AppState.cargosActivos.reduce((acc, c) => {
       return acc + c.detalles.reduce((s, d) => s + Math.max(0, Number(d.DEUDA || 0)), 0);
@@ -1106,6 +1140,10 @@ function configurarEventosUI() {
   document.getElementById('btnEliminarCargoModal')?.addEventListener('click', eliminarCargoActual);
   document.getElementById('btnPrintModal')?.addEventListener('click', generarDocumentoImpresion);
 
+  document.getElementById('btnAbrirSesion')?.addEventListener('click', () => {
+    document.getElementById('modalSesion')?.classList.remove('hidden');
+  });
+
   document.getElementById('inputBuscarActivos')?.addEventListener('input', (e) => {
     AppState.busquedaActivos = e.target.value;
     renderizarCargosActivos();
@@ -1121,15 +1159,16 @@ function configurarEventosUI() {
     renderizarHistorial();
   });
 
-  document.getElementById('formLogin')?.addEventListener('submit', (e) => {
+  document.getElementById('formSesion')?.addEventListener('submit', (e) => {
     e.preventDefault();
-    const nombre = document.getElementById('loginNombre')?.value.trim();
-    const rol = document.getElementById('loginRol')?.value.trim() || 'OPERADOR';
+    const sel = document.getElementById('selectGestorSesion');
+    const nombre = sel?.value.trim() || document.getElementById('inputGestorManual')?.value.trim();
+    const rol = sel?.selectedOptions?.[0]?.dataset?.rol || document.getElementById('selectRolSesion')?.value || 'OPERADOR';
     if (!nombre) return;
     AppState.usuario = { nombre, rol };
     localStorage.setItem('genlogistics_user', JSON.stringify(AppState.usuario));
     actualizarHeaderUsuario();
-    document.getElementById('modalLogin')?.classList.add('hidden');
+    document.getElementById('modalSesion')?.classList.add('hidden');
     mostrarToast(`Sesión iniciada: ${nombre} (${rol})`, 'success');
   });
 }
