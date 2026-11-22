@@ -61,6 +61,17 @@ function formatFechaLimaLocal(dateObj = new Date()) {
   return `${dd}/${mm}/${yyyy} ${hh}:${min}:${ss}`;
 }
 
+/**
+ * Regla de Negocio: Un viaje es pendiente SOLO si NO tiene ningún retorno registrado (DEVUELVE === 0)
+ * y posee unidades despachadas pendientes. Si ya tuvo retorno (con faltante o excedente), pertenece al Histórico.
+ */
+function esViajeSinRetorno(cargo) {
+  if (!cargo || !Array.isArray(cargo.detalles) || cargo.detalles.length === 0) return false;
+  const tieneAlgunRetorno = cargo.detalles.some(d => (parseInt(d.DEVUELVE || 0, 10) > 0));
+  if (tieneAlgunRetorno) return false;
+  return cargo.detalles.some(d => (parseInt(d.LLEVA || 0, 10) > 0));
+}
+
 // ==========================================
 // 1. SEGURIDAD: IFRAME ENFORCER (Anti-Bypass)
 // ==========================================
@@ -304,10 +315,12 @@ function actualizarBadgeSync(pendingCount, isOnline) {
 
 function handleRemoteSyncUpdate({ cargosActivos, historial }) {
   if (Array.isArray(cargosActivos)) {
-    AppState.cargosActivos = cargosActivos.map(cargo => ({
-      ...cargo,
-      _horaSort: estandarizarFecha(cargo.hora)
-    }));
+    AppState.cargosActivos = cargosActivos
+      .filter(esViajeSinRetorno)
+      .map(cargo => ({
+        ...cargo,
+        _horaSort: estandarizarFecha(cargo.hora)
+      }));
     if (!document.getElementById('viewDescargo')?.classList.contains('hidden')) {
       renderizarCargosFiltrados();
     }
@@ -443,8 +456,10 @@ async function initApp() {
     construirUI();
     initSignaturePad();
   }
-  if (cachedCargos) {
-    AppState.cargosActivos = cachedCargos.map(c => ({ ...c, _horaSort: estandarizarFecha(c.hora) }));
+ if (cachedCargos) {
+    AppState.cargosActivos = cachedCargos
+      .filter(esViajeSinRetorno)
+      .map(c => ({ ...c, _horaSort: estandarizarFecha(c.hora) }));
   }
   if (cachedHistorial) {
     AppState.historial = cachedHistorial;
@@ -1427,7 +1442,8 @@ function renderizarKPIsDescargos() {
 function renderizarCargosFiltrados() {
   renderizarKPIsDescargos();
 
-  let filtrados = [...AppState.cargosActivos];
+  // Filtro maestro: solo viajes sin ningún retorno registrado
+  let filtrados = AppState.cargosActivos.filter(esViajeSinRetorno);
   const searchTerm = (document.getElementById("inBuscarCargo")?.value || "").toLowerCase().trim();
   const filtroColumna = document.getElementById("selFiltroColumna")?.value || "todos";
   const { soloCriticosSLA, materialId } = AppState.filtrosGlobales;
@@ -1439,7 +1455,7 @@ function renderizarCargosFiltrados() {
   }
 
   if (materialId) {
-    filtrados = filtrados.filter(c => c.detalles.some(d => d.MATERIAL === materialId && (parseInt(d.DEUDA ?? (d.LLEVA - d.DEVUELVE), 10) !== 0)));
+    filtrados = filtrados.filter(c => c.detalles.some(d => d.MATERIAL === materialId && (parseInt(d.LLEVA || 0, 10) > 0)));
   }
 
   if (searchTerm) {
@@ -1487,7 +1503,6 @@ function renderizarTablaUI(cargos) {
             <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('choferNombre')">Chofer ${getSortIcon("choferNombre")}</th>
             <th class="px-4 py-4 cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors" onclick="setSort('fecha')">Hora Salida / SLA ${getSortIcon("hora")}</th>
             <th class="px-4 py-4 text-center">Estado</th>
-            <th class="px-4 py-4 text-center">Imprimir</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200 dark:divide-gray-800/60 bg-white dark:bg-transparent">
@@ -1521,7 +1536,7 @@ function renderizarTablaUI(cargos) {
     }
 
     html += `
-      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${safeId}')" title="Clic para ver detalles y liquidar">
+      <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors group cursor-pointer" onclick="abrirDetalle('${safeId}')" title="Clic para ver detalles, liquidar o imprimir">
         <td class="px-4 py-3 font-mono text-xs flex items-center gap-1.5 ${isLocal ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-gray-500 dark:text-gray-400'}">
           ${isLocal ? `<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping" title="Pendiente de sincronización"></span>` : ''}
           ${safeId}
@@ -1530,18 +1545,6 @@ function renderizarTablaUI(cargos) {
         <td class="px-4 py-3 font-bold text-gray-800 dark:text-gray-200 truncate max-w-[200px]">${escapeHTML(cargo.choferNombre)}</td>
         <td class="px-4 py-3 text-emerald-600 dark:text-emerald-400/80 font-mono text-xs tracking-wider">${escapeHTML(horaSalida)}${getBadgeSLA(horaSalida)}</td>
         <td class="px-4 py-3 text-center align-middle">${badgeEstadoHTML}</td>
-        <td class="px-4 py-3 text-center align-middle" onclick="event.stopPropagation()">
-          <div class="inline-flex items-center gap-1.5">
-            <button type="button" onclick="generarDocumentoImpresion('${safeId}', 'TICKET')" title="Imprimir Ticket 80mm"
-              class="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded-lg text-[11px] font-bold transition-all active:scale-95">
-              Ticket
-            </button>
-            <button type="button" onclick="generarDocumentoImpresion('${safeId}', 'A4')" title="Imprimir Hoja A4"
-              class="px-2.5 py-1 bg-blue-50 hover:bg-blue-600 text-blue-700 hover:text-white dark:bg-blue-500/15 dark:hover:bg-blue-600 dark:text-blue-300 dark:hover:text-white border border-blue-200 dark:border-blue-500/30 rounded-lg text-[11px] font-bold transition-all active:scale-95">
-              A4
-            </button>
-          </div>
-        </td>
       </tr>
     `;
   });
@@ -1812,7 +1815,7 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
   const { lleva: nuevoLleva, devuelve: nuevoDevuelve } = resultado;
   const nuevaDeuda = nuevoLleva - nuevoDevuelve;
 
-  let cargoIdx = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
+ let cargoIdx = AppState.cargosActivos.findIndex(c => c.idCargo === idCargo);
   if (cargoIdx !== -1) {
     const det = AppState.cargosActivos[cargoIdx].detalles.find(d => d.ID_DETALLE === idDetalle);
     if (det) {
@@ -1820,18 +1823,17 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
       det.DEVUELVE = nuevoDevuelve;
       det.DEUDA = nuevaDeuda;
     }
-    const tieneDeudaPositiva = AppState.cargosActivos[cargoIdx].detalles.some(d => parseInt(d.DEUDA || 0, 10) > 0);
-    if (!tieneDeudaPositiva) {
+    if (!esViajeSinRetorno(AppState.cargosActivos[cargoIdx])) {
       AppState.cargosActivos.splice(cargoIdx, 1);
     }
     await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
-  } else if (nuevaDeuda > 0) {
+  } else {
     const lineasHist = AppState.historial.filter(h => h.idCargo === idCargo);
     if (lineasHist.length > 0) {
       const ref = lineasHist[0];
       const respId = cleanId(ref.chofer);
       const choferObj = AppState.datos.choferes.find(c => cleanId(c.ID_CHFR) === respId);
-      AppState.cargosActivos.unshift({
+      const cargoReconstruido = {
         idCargo: ref.idCargo,
         choferId: respId,
         choferNombre: choferObj ? choferObj.NOMBRE : (respId || "Desconocido"),
@@ -1849,8 +1851,11 @@ window.corregirLineaDetalle = async function (idCargo, idDetalle, llevaActual, d
           EMISOR: h.emisor,
           RESPONSABLE: respId
         }))
-      });
-      await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
+      };
+      if (esViajeSinRetorno(cargoReconstruido)) {
+        AppState.cargosActivos.unshift(cargoReconstruido);
+        await SyncEngine.saveCache('cargosActivos', AppState.cargosActivos);
+      }
     }
   }
 
