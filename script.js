@@ -467,7 +467,7 @@ window.forzarSincronizacionManual = async function (e) {
     renderizarCargosFiltrados();
     renderizarHistorico();
 
-    mostrarToast("Datos sincronizados con Google Sheets.");
+    mostrarToast("Datos sincronizados.");
   } catch (err) {
     console.error("[SyncManual] Error:", err);
     mostrarToast(`Error al sincronizar: ${err.message}`, "error");
@@ -1953,7 +1953,7 @@ window.eliminarLineaDetalle = async function (idCargo, idDetalle, nombreMaterial
   const confirmado = await GenDialog.confirm({
     badge: 'Eliminar Ítem',
     title: `¿Eliminar "${nombreMaterial}"?`,
-    message: `Se removerá la línea <strong class="font-mono text-gray-900 dark:text-white">${escapeHTML(idDetalle)}</strong> del cargo <strong class="font-mono text-gray-900 dark:text-white">${escapeHTML(idCargo)}</strong> y se recalculará el saldo en Google Sheets.`,
+    message: `Se removerá la línea <strong class="font-mono text-gray-900 dark:text-white">${escapeHTML(idDetalle)}</strong> del cargo <strong class="font-mono text-gray-900 dark:text-white">${escapeHTML(idCargo)}</strong> y se recalculará el saldo.`,
     confirmText: 'Sí, eliminar ítem',
     variant: 'danger'
   });
@@ -2008,7 +2008,7 @@ window.eliminarCargoCompleto = async function (idCargo) {
   const confirmado = await GenDialog.confirm({
     badge: 'Acción Destructiva',
     title: `¿Eliminar por completo el cargo ${idCargo}?`,
-    message: 'Esta operación eliminará permanentemente la cabecera y <strong>todos los materiales asociados</strong> en la base de datos de Google Sheets.',
+    message: 'Esta operación eliminará permanentemente la cabecera y <strong>todos los materiales asociados</strong> en la base de datos.',
     confirmText: 'Eliminar Cargo Completo',
     variant: 'danger'
   });
