@@ -20,6 +20,7 @@ const AppState = {
   },
   cargoItems: [],
   cargosActivos: [],
+  pendingAutoPrint: [],
   sortConfig: { key: "fecha", asc: false },
   filtrosGlobales: {
     soloCriticosSLA: false,
@@ -313,18 +314,62 @@ function actualizarBadgeSync(pendingCount, isOnline) {
   }
 }
 
+function resolverImpresionDiferidaOficial(cargosRemotos) {
+  if (!Array.isArray(AppState.pendingAutoPrint) || AppState.pendingAutoPrint.length === 0) return;
+  if (!Array.isArray(cargosRemotos) || cargosRemotos.length === 0) return;
+
+  const pendientesRestantes = [];
+
+  AppState.pendingAutoPrint.forEach((pend) => {
+    // 1. Búsqueda directa si el backend devuelve localIdRef o mantiene firma/metadatos exactos
+    const matchOficial = cargosRemotos.find((c) => {
+      const idOficial = String(c.idCargo || "");
+      if (!idOficial || idOficial.startsWith("LOC-")) return false;
+
+      if (c.localIdRef && c.localIdRef === pend.localId) return true;
+
+      const mismoChofer = cleanId(c.choferId) === cleanId(pend.choferId);
+      const mismaPlaca = cleanId(c.placa) === cleanId(pend.placa);
+      const mismasLineas = Array.isArray(c.detalles) && c.detalles.length === pend.totalItems;
+      const mismasUnidades = Array.isArray(c.detalles) &&
+        c.detalles.reduce((acc, d) => acc + (parseInt(d.LLEVA || 0, 10)), 0) === pend.totalUnidades;
+
+      return mismoChofer && mismaPlaca && mismasLineas && mismasUnidades;
+    });
+
+    if (matchOficial) {
+      // Abrir modal oficial validado y lanzar impresión directa del Ticket 80mm
+      abrirDetalle(matchOficial.idCargo);
+      setTimeout(() => {
+        generarDocumentoImpresion(matchOficial.idCargo, 'TICKET');
+      }, 250);
+    } else if (Date.now() - pend.createdAt < 300000) {
+      // Mantener en espera hasta 5 minutos si aún no termina de subir la cola offline
+      pendientesRestantes.push(pend);
+    }
+  });
+
+  AppState.pendingAutoPrint = pendientesRestantes;
+}
+
 function handleRemoteSyncUpdate({ cargosActivos, historial }) {
   if (Array.isArray(cargosActivos)) {
+    // 1. Verificar antes de filtrar si algún cargo recién validado debe abrir impresión oficial
+    resolverImpresionDiferidaOficial(cargosActivos);
+
+    // 2. Aplicar regla de negocio: solo viajes sin ningún retorno registrado
     AppState.cargosActivos = cargosActivos
       .filter(esViajeSinRetorno)
       .map(cargo => ({
         ...cargo,
         _horaSort: estandarizarFecha(cargo.hora)
       }));
+
     if (!document.getElementById('viewDescargo')?.classList.contains('hidden')) {
       renderizarCargosFiltrados();
     }
   }
+
   if (Array.isArray(historial)) {
     AppState.historial = historial;
     if (!document.getElementById('viewHistorico')?.classList.contains('hidden')) {
@@ -1140,11 +1185,25 @@ async function handleFormSubmit(e) {
     }
   });
 
-  if (document.getElementById("chkAutoPrint")?.checked) {
-    generarDocumentoImpresion(idLocal, 'TICKET');
+const quiereAutoPrint = Boolean(document.getElementById("chkAutoPrint")?.checked);
+
+  if (quiereAutoPrint) {
+    AppState.pendingAutoPrint.push({
+      localId: idLocal,
+      choferId: chofer,
+      placa: vehiculo,
+      totalItems: materialesPayload.length,
+      totalUnidades: materialesPayload.reduce((acc, m) => acc + (parseInt(m.cantidad, 10) || 0), 0),
+      createdAt: Date.now()
+    });
   }
 
-  mostrarToast(`Cargo ${idLocal} registrado. Sincronizando en segundo plano...`);
+  mostrarToast(
+    quiereAutoPrint
+      ? `Cargo ${idLocal} guardado. Validando código oficial para imprimir...`
+      : `Cargo ${idLocal} registrado. Sincronizando en segundo plano...`
+  );
+  
   document.getElementById("cargoForm").reset();
   ["hdArea", "hdChofer", "hdVehiculo", "hdDestino", "hdMaterial"].forEach((id) => (document.getElementById(id).value = ""));
   AppState.cargoItems = [];
@@ -2830,6 +2889,14 @@ window.abrirTrazabilidad = function (e, idDetalle) {
 // 13. MOTOR DE IMPRESIÓN DIRECTA DUAL (A4 Y TICKET 80MM AGRUPADOS POR DESTINO)
 // ==========================================
 window.generarDocumentoImpresion = function (idCargo, formato = 'A4') {
+if (String(idCargo || "").startsWith("LOC-")) {
+    return mostrarAlerta(
+      "Este cargo aún tiene un código temporal (LOC). Espera unos segundos a que se valide su código oficial GCM para imprimir.",
+      "warning",
+      "Validando Correlativo Oficial"
+    );
+  }
+  
   let cargo = AppState.cargosActivos.find((c) => c.idCargo === idCargo);
 
   if (!cargo) {
