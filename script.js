@@ -341,7 +341,7 @@ function resolverImpresionDiferidaOficial(cargosRemotos) {
       // Abrir modal oficial validado y lanzar impresión directa del Ticket 80mm
       abrirDetalle(matchOficial.idCargo);
       setTimeout(() => {
-        generarDocumentoImpresion(matchOficial.idCargo, 'TICKET');
+        generarDocumentoImpresion(matchOficial.idCargo, 'A4');
       }, 250);
     } else if (Date.now() - pend.createdAt < 300000) {
       // Mantener en espera hasta 5 minutos si aún no termina de subir la cola offline
