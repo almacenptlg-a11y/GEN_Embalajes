@@ -7,7 +7,7 @@
 // ==========================================
 // 1. CONFIGURACIÓN GLOBAL Y ESTADO REACTIVO
 // ==========================================
-const API_URL = "https://script.google.com/macros/s/AKfycbz-n25x1G69pP9k-Y95T6Q8B2N95i1W5S_1w86E2b8W8n2w8w90k5F1y4q3m9E1B5/exec"; // ⚠️ Verifica que coincida con tu URL de despliegue GAS actual
+const API_URL = "https://script.google.com/macros/s/AKfycbzhPAhH-K2qURzzW69xoH-QJ6RZdmQw3gJIt80Y6f4iTKyS7BqhXrgHTGWrO0PiSj4m/exec"; // ⚠️ Verifica que coincida con tu URL de despliegue GAS actual
 const API_TOKEN = "GEN_EMB_2026_SECURE_KEY";
 
 const AppState = {
