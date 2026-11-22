@@ -1,161 +1,119 @@
 /**
- * ============================================================================
- * GENLOGISTICS | SERVICE WORKER OFFLINE-FIRST (sw.js)
- * Versión: 2.0.0-OPT | Estrategia: Network-First (App Shell) + SWR (Assets)
- * ----------------------------------------------------------------------------
- * Responsabilidades:
- * 1. Precaching del App Shell crítico para arranque instantáneo sin red.
- * 2. Network-First para HTML/JS (garantiza sincronía de contrato con GAS).
- * 3. Stale-While-Revalidate para CSS compilado y recursos gráficos.
- * 4. Bypass absoluto para peticiones API hacia script.google.com y métodos POST.
- * ============================================================================
+ * @fileoverview Service Worker - GenLogistics Embalajes (Offline App Shell v1.3.2)
+ * @architecture Stale-While-Revalidate para App Shell | Network-Only para API GAS
  */
 
-const CACHE_VERSION = 'genlogistics-shell-v2.0.0';
+const CACHE_VERSION = 'genlogistics-embalajes-v1.3.2';
+const MEDIA_CACHE = 'genlogistics-media-v1';
 
-// Rutas relativas para compatibilidad total con subdirectorios de GitHub Pages
-const PRECACHE_ASSETS = [
+// Recursos estáticos críticos que forman el App Shell (100% Zero-CDN)
+const APP_SHELL_ASSETS = [
   './',
   './index.html',
   './styles.css',
-  './script.js',
-  './sync-engine.js'
+  './sync-engine.js',
+  './script.js'
 ];
 
-// ============================================================================
-// 1. INSTALACIÓN Y PRECACHING DEL APP SHELL
-// ============================================================================
+// ==========================================
+// 1. INSTALACIÓN: PRE-CACHEO DEL APP SHELL
+// ==========================================
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_VERSION)
       .then((cache) => {
-        // addAll falla atómicamente si algún archivo no existe; mapeamos individualmente para resiliencia
-        return Promise.allSettled(
-          PRECACHE_ASSETS.map((url) =>
-            fetch(new Request(url, { cache: 'reload' }))
-              .then((res) => {
-                if (res.ok) return cache.put(url, res);
-              })
-              .catch(() => null)
-          )
-        );
+        console.info('[SW] Pre-cacheando App Shell v1.3.2...');
+        return cache.addAll(APP_SHELL_ASSETS);
       })
-      .then(() => self.skipWaiting()) // Activación inmediata sin esperar cierre de pestañas
+      .then(() => self.skipWaiting())
+      .catch((err) => console.error('[SW] Error durante pre-cacheo:', err))
   );
 });
 
-// ============================================================================
-// 2. ACTIVACIÓN Y LIMPIEZA DE VERSIONES ANTERIORES
-// ============================================================================
+// ==========================================
+// 2. ACTIVACIÓN: LIMPIEZA DE CACHÉS OBSOLETOS
+// ==========================================
 self.addEventListener('activate', (event) => {
+  const validCaches = new Set([CACHE_VERSION, MEDIA_CACHE]);
+
   event.waitUntil(
     caches.keys()
       .then((cacheNames) => {
         return Promise.all(
-          cacheNames
-            .filter((name) => name !== CACHE_VERSION)
-            .map((oldCache) => caches.delete(oldCache))
+          cacheNames.map((cacheName) => {
+            if (!validCaches.has(cacheName)) {
+              console.info('[SW] Eliminando caché antiguo:', cacheName);
+              return caches.delete(cacheName);
+            }
+          })
         );
       })
-      .then(() => self.clients.claim()) // Toma control inmediato de clientes activos
+      .then(() => self.clients.claim())
   );
 });
 
-// ============================================================================
-// 3. INTERCEPTOR DE RED (ROUTING DE ESTRATEGIAS)
-// ============================================================================
+// ==========================================
+// 3. INTERCEPTOR DE RED (FETCH)
+// ==========================================
 self.addEventListener('fetch', (event) => {
-  const { request } = event;
-  const url = new URL(request.url);
+  const request = event.request;
 
-  // 1. Bypass estricto: Solo interceptar GET del mismo origen (ignorar GAS, extensiones, POST)
+  // REGLA 1: Solo interceptar GET sobre HTTP/HTTPS
+  if (request.method !== 'GET' || !request.url.startsWith('http')) return;
+
+  const requestUrl = new URL(request.url);
+
+  // REGLA 2: Bypass total para API Google Apps Script (manejo exclusivo de SyncEngine)
   if (
-    request.method !== 'GET' ||
-    url.origin !== self.location.origin ||
-    url.hostname.includes('script.google.com') ||
-    url.hostname.includes('script.googleusercontent.com')
+    requestUrl.hostname.includes('script.google.com') ||
+    requestUrl.hostname.includes('script.googleusercontent.com')
   ) {
     return;
   }
 
-  // 2. Estrategia NETWORK-FIRST para HTML y Scripts JS (evita desfase de contrato con Backend)
-  const esDocumentoOJs =
-    request.mode === 'navigate' ||
-    url.pathname.endsWith('.html') ||
-    url.pathname.endsWith('.js') ||
-    url.pathname === '/' ||
-    url.pathname.endsWith('/');
+  // REGLA 3: Cache-First para fotos de vehículos/assets externos de imagen
+  if (request.destination === 'image' && requestUrl.origin !== self.location.origin) {
+    event.respondWith(
+      caches.open(MEDIA_CACHE).then(async (cache) => {
+        const cachedImg = await cache.match(request);
+        if (cachedImg) return cachedImg;
 
-  if (esDocumentoOJs) {
-    event.respondWith(networkFirstStrategy(request));
+        try {
+          const netImg = await fetch(request);
+          if (netImg && (netImg.status === 200 || netImg.type === 'opaque')) {
+            cache.put(request, netImg.clone());
+          }
+          return netImg;
+        } catch (e) {
+          return new Response('', { status: 408, statusText: 'Offline Image' });
+        }
+      })
+    );
     return;
   }
 
-  // 3. Estrategia STALE-WHILE-REVALIDATE para CSS compilado, fuentes y SVGs
-  event.respondWith(staleWhileRevalidateStrategy(request));
-});
+  // REGLA 4: Stale-While-Revalidate con fallback blindado para el App Shell
+  event.respondWith(
+    caches.match(request, { ignoreSearch: true }).then((cachedResponse) => {
+      const fetchPromise = fetch(request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_VERSION).then((cache) => {
+              cache.put(request, responseToCache);
+            });
+          }
+          return networkResponse;
+        })
+        .catch(async () => {
+          // Si estamos offline y no había match exacto, devolver index.html en navegaciones
+          if (request.mode === 'navigate') {
+            return caches.match('./index.html');
+          }
+          return cachedResponse;
+        });
 
-/**
- * Network-First con timeout de seguridad (3.5s) para evitar pantallas blancas en redes 2G/3G lentas.
- */
-async function networkFirstStrategy(request) {
-  const cache = await caches.open(CACHE_VERSION);
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-    const networkResponse = await fetch(request, {
-      cache: 'no-cache',
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-
-    if (networkResponse && networkResponse.ok) {
-      cache.put(request, networkResponse.clone());
-      return networkResponse;
-    }
-    throw new Error('Respuesta de red no válida');
-  } catch (err) {
-    const cachedResponse = await cache.match(request, { ignoreSearch: true });
-    if (cachedResponse) {
-      return cachedResponse;
-    }
-    // Fallback último recurso al shell principal si es navegación SPA
-    if (request.mode === 'navigate') {
-      return cache.match('./index.html');
-    }
-    return new Response('Recurso no disponible sin conexión.', {
-      status: 503,
-      statusText: 'Offline'
-    });
-  }
-}
-
-/**
- * Stale-While-Revalidate: Sirve desde caché en O(1) y actualiza en segundo plano.
- */
-async function staleWhileRevalidateStrategy(request) {
-  const cache = await caches.open(CACHE_VERSION);
-  const cachedResponse = await cache.match(request, { ignoreSearch: true });
-
-  const fetchPromise = fetch(request)
-    .then((networkResponse) => {
-      if (networkResponse && networkResponse.ok) {
-        cache.put(request, networkResponse.clone());
-      }
-      return networkResponse;
+      return cachedResponse || fetchPromise;
     })
-    .catch(() => null);
-
-  return cachedResponse || fetchPromise;
-}
-
-// ============================================================================
-// 4. CANAL DE MENSAJES DESDE LA UI (FORZAR ACTUALIZACIÓN MANUAL)
-// ============================================================================
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
+  );
 });
