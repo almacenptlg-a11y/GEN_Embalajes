@@ -314,37 +314,56 @@ function actualizarBadgeSync(pendingCount, isOnline) {
   }
 }
 
-function resolverImpresionDiferidaOficial(cargosRemotos) {
+
+function resolverImpresionDiferidaOficial(cargosRemotos, historialRemoto = []) {
   if (!Array.isArray(AppState.pendingAutoPrint) || AppState.pendingAutoPrint.length === 0) return;
-  if (!Array.isArray(cargosRemotos) || cargosRemotos.length === 0) return;
 
   const pendientesRestantes = [];
 
   AppState.pendingAutoPrint.forEach((pend) => {
-    // 1. Búsqueda directa si el backend devuelve localIdRef o mantiene firma/metadatos exactos
-    const matchOficial = cargosRemotos.find((c) => {
+    // 1. Buscar coincidencia oficial en cargosActivos
+    let matchOficial = (cargosRemotos || []).find((c) => {
       const idOficial = String(c.idCargo || "");
       if (!idOficial || idOficial.startsWith("LOC-")) return false;
 
+      // Prioridad 1: Referencia directa devuelta por el backend
       if (c.localIdRef && c.localIdRef === pend.localId) return true;
 
+      // Prioridad 2: Huella exacta de emisión reciente (evita colisión con viajes antiguos del mismo chofer)
       const mismoChofer = cleanId(c.choferId) === cleanId(pend.choferId);
       const mismaPlaca = cleanId(c.placa) === cleanId(pend.placa);
       const mismasLineas = Array.isArray(c.detalles) && c.detalles.length === pend.totalItems;
       const mismasUnidades = Array.isArray(c.detalles) &&
         c.detalles.reduce((acc, d) => acc + (parseInt(d.LLEVA || 0, 10)), 0) === pend.totalUnidades;
+      const ceroRetornos = Array.isArray(c.detalles) &&
+        c.detalles.every((d) => (parseInt(d.DEVUELVE || 0, 10) === 0));
 
-      return mismoChofer && mismaPlaca && mismasLineas && mismasUnidades;
+      return mismoChofer && mismaPlaca && mismasLineas && mismasUnidades && ceroRetornos;
     });
 
+    // Fallback: Si por alguna razón ya entró en historial con el mismo ID recién generado
+    if (!matchOficial && Array.isArray(historialRemoto) && historialRemoto.length > 0) {
+      const movHist = historialRemoto.find(h =>
+        h.idCargo && !String(h.idCargo).startsWith("LOC-") &&
+        cleanId(h.chofer) === cleanId(pend.choferId) &&
+        cleanId(h.placa) === cleanId(pend.placa) &&
+        h.horaCargo === pend.horaLocal
+      );
+      if (movHist) {
+        matchOficial = { idCargo: movHist.idCargo };
+      }
+    }
+
     if (matchOficial) {
-      // Abrir modal oficial validado y lanzar impresión directa del Ticket 80mm
-      abrirDetalle(matchOficial.idCargo);
+      const idDefinitivo = matchOficial.idCargo;
+      // 1. Abrir modal principal con el ID oficial validado
+      abrirDetalle(idDefinitivo);
+
+      // 2. Disparar vista de impresión A4 una vez renderizado el modal oficial
       setTimeout(() => {
-        generarDocumentoImpresion(matchOficial.idCargo, 'A4');
-      }, 250);
+        generarDocumentoImpresion(idDefinitivo, 'A4');
+      }, 300);
     } else if (Date.now() - pend.createdAt < 300000) {
-      // Mantener en espera hasta 5 minutos si aún no termina de subir la cola offline
       pendientesRestantes.push(pend);
     }
   });
@@ -354,10 +373,6 @@ function resolverImpresionDiferidaOficial(cargosRemotos) {
 
 function handleRemoteSyncUpdate({ cargosActivos, historial }) {
   if (Array.isArray(cargosActivos)) {
-    // 1. Verificar antes de filtrar si algún cargo recién validado debe abrir impresión oficial
-    resolverImpresionDiferidaOficial(cargosActivos);
-
-    // 2. Aplicar regla de negocio: solo viajes sin ningún retorno registrado
     AppState.cargosActivos = cargosActivos
       .filter(esViajeSinRetorno)
       .map(cargo => ({
@@ -377,13 +392,20 @@ function handleRemoteSyncUpdate({ cargosActivos, historial }) {
     }
   }
 
+  // Cerrar modal temporal si estaba abierto con ID provisional LOC-
   if (cargoActualModalId && String(cargoActualModalId).startsWith("LOC-")) {
     const sigueExistiendo = AppState.cargosActivos.some(c => c.idCargo === cargoActualModalId);
     if (!sigueExistiendo) {
       cerrarDetalle();
     }
   }
+
+  // Conciliar e imprimir en A4 una vez que AppState.cargosActivos e AppState.historial ya están actualizados en memoria
+  if (Array.isArray(cargosActivos) || Array.isArray(historial)) {
+    resolverImpresionDiferidaOficial(AppState.cargosActivos, AppState.historial);
+  }
 }
+
 
 window.forzarSincronizacionManual = async function (e) {
   if (e && typeof e.preventDefault === 'function') e.preventDefault();
@@ -1185,13 +1207,15 @@ async function handleFormSubmit(e) {
     }
   });
 
-const quiereAutoPrint = Boolean(document.getElementById("chkAutoPrint")?.checked);
+const chkPrintEl = document.getElementById("chkAutoPrint");
+  const quiereAutoPrint = chkPrintEl ? chkPrintEl.checked : true;
 
   if (quiereAutoPrint) {
     AppState.pendingAutoPrint.push({
       localId: idLocal,
       choferId: chofer,
       placa: vehiculo,
+      horaLocal: fechaFormat,
       totalItems: materialesPayload.length,
       totalUnidades: materialesPayload.reduce((acc, m) => acc + (parseInt(m.cantidad, 10) || 0), 0),
       createdAt: Date.now()
@@ -1200,7 +1224,7 @@ const quiereAutoPrint = Boolean(document.getElementById("chkAutoPrint")?.checked
 
   mostrarToast(
     quiereAutoPrint
-      ? `Cargo ${idLocal} guardado. Validando código oficial para imprimir...`
+      ? `Cargo ${idLocal} guardado. Validando código oficial para abrir impresión A4...`
       : `Cargo ${idLocal} registrado. Sincronizando en segundo plano...`
   );
   
