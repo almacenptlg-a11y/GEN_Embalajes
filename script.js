@@ -211,11 +211,12 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await SyncEngine.init({
+ await SyncEngine.init({
     apiUrl: API_URL,
     token: API_SECRET_TOKEN,
     onQueueChange: actualizarBadgeSync,
     onRemoteDataSync: handleRemoteSyncUpdate,
+    onIdReconciled: handleIdReconciled,
     onSyncError: (msg) => mostrarToast(`Error de sincronización: ${msg}`, 'error')
   });
 
@@ -314,6 +315,30 @@ function actualizarBadgeSync(pendingCount, isOnline) {
   }
 }
 
+function handleIdReconciled({ action, localId, officialId }) {
+  if (action !== 'saveCargo' || !localId || !officialId) return;
+
+  // 1. Reemplazar al instante en memoria el ID provisional LOC-* por el oficial GCM-*
+  const cargoLocal = AppState.cargosActivos.find(c => c.idCargo === localId);
+  if (cargoLocal) {
+    cargoLocal.idCargo = officialId;
+    cargoLocal.isLocalSyncPending = false;
+    if (!document.getElementById('viewDescargo')?.classList.contains('hidden')) {
+      renderizarCargosFiltrados();
+    }
+  }
+
+  // 2. Si el cargo estaba en la cola de impresión oficial diferida, abrir Modal + Impresión A4
+  const idxPend = AppState.pendingAutoPrint.findIndex(p => p.localId === localId);
+  if (idxPend !== -1) {
+    AppState.pendingAutoPrint.splice(idxPend, 1);
+
+    abrirDetalle(officialId);
+    setTimeout(() => {
+      generarDocumentoImpresion(officialId, 'A4');
+    }, 250);
+  }
+}
 
 function resolverImpresionDiferidaOficial(cargosRemotos, historialRemoto = []) {
   if (!Array.isArray(AppState.pendingAutoPrint) || AppState.pendingAutoPrint.length === 0) return;
