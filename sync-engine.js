@@ -19,9 +19,9 @@ const SyncEngine = (() => {
         token: '',
         onQueueChange: () => {},      // Callback para actualizar badge en UI
         onRemoteDataSync: () => {},   // Callback cuando llegan datos frescos en segundo plano
+        onIdReconciled: () => {},     // Callback inmediato O(1) cuando GAS asigna el ID oficial GCM-*
         onSyncError: () => {}         // Callback silencioso o de log
     };
-
     // ==========================================
     // 1. INICIALIZACIÓN DE INDEXEDDB
     // ==========================================
@@ -147,7 +147,7 @@ const SyncEngine = (() => {
         config.onQueueChange(items.length, navigator.onLine);
     }
 
-    // Reconcilia IDs temporales (LOC-*) en caché tras respuesta exitosa de GAS
+   // Reconcilia IDs temporales (LOC-*) en caché y notifica O(1) tras respuesta exitosa de GAS
     async function reconcileServerIds(action, resultData) {
         if (!resultData || typeof resultData !== 'object') return;
 
@@ -161,6 +161,13 @@ const SyncEngine = (() => {
                     await saveCache('cargosActivos', cargos);
                 }
             }
+
+            // Disparador determinista inmediato para UI / Auto-Print A4
+            config.onIdReconciled({
+                action: 'saveCargo',
+                localId: resultData.localIdRef,
+                officialId: resultData.idCargo
+            });
         }
 
         if (action === 'addDetalleCargo' && resultData.localDetalleRef && resultData.idDetalle) {
@@ -175,6 +182,12 @@ const SyncEngine = (() => {
                     }
                 }
             }
+
+            config.onIdReconciled({
+                action: 'addDetalleCargo',
+                localId: resultData.localDetalleRef,
+                officialId: resultData.idDetalle
+            });
         }
     }
 
