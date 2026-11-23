@@ -328,7 +328,7 @@ function handleIdReconciled({ action, localId, officialId }) {
     }
   }
 
-  // 2. Si el cargo estaba en la cola de impresión oficial diferida, abrir Modal + Impresión A4
+  // 2. Conciliación atómica: extraer de pendingAutoPrint antes de disparar impresión para evitar duplicados
   const idxPend = AppState.pendingAutoPrint.findIndex(p => p.localId === localId);
   if (idxPend !== -1) {
     AppState.pendingAutoPrint.splice(idxPend, 1);
@@ -346,15 +346,12 @@ function resolverImpresionDiferidaOficial(cargosRemotos, historialRemoto = []) {
   const pendientesRestantes = [];
 
   AppState.pendingAutoPrint.forEach((pend) => {
-    // 1. Buscar coincidencia oficial en cargosActivos
     let matchOficial = (cargosRemotos || []).find((c) => {
       const idOficial = String(c.idCargo || "");
       if (!idOficial || idOficial.startsWith("LOC-")) return false;
 
-      // Prioridad 1: Referencia directa devuelta por el backend
       if (c.localIdRef && c.localIdRef === pend.localId) return true;
 
-      // Prioridad 2: Huella exacta de emisión reciente (evita colisión con viajes antiguos del mismo chofer)
       const mismoChofer = cleanId(c.choferId) === cleanId(pend.choferId);
       const mismaPlaca = cleanId(c.placa) === cleanId(pend.placa);
       const mismasLineas = Array.isArray(c.detalles) && c.detalles.length === pend.totalItems;
@@ -366,7 +363,6 @@ function resolverImpresionDiferidaOficial(cargosRemotos, historialRemoto = []) {
       return mismoChofer && mismaPlaca && mismasLineas && mismasUnidades && ceroRetornos;
     });
 
-    // Fallback: Si por alguna razón ya entró en historial con el mismo ID recién generado
     if (!matchOficial && Array.isArray(historialRemoto) && historialRemoto.length > 0) {
       const movHist = historialRemoto.find(h =>
         h.idCargo && !String(h.idCargo).startsWith("LOC-") &&
@@ -381,10 +377,7 @@ function resolverImpresionDiferidaOficial(cargosRemotos, historialRemoto = []) {
 
     if (matchOficial) {
       const idDefinitivo = matchOficial.idCargo;
-      // 1. Abrir modal principal con el ID oficial validado
       abrirDetalle(idDefinitivo);
-
-      // 2. Disparar vista de impresión A4 una vez renderizado el modal oficial
       setTimeout(() => {
         generarDocumentoImpresion(idDefinitivo, 'A4');
       }, 300);
@@ -417,7 +410,6 @@ function handleRemoteSyncUpdate({ cargosActivos, historial }) {
     }
   }
 
-  // Cerrar modal temporal si estaba abierto con ID provisional LOC-
   if (cargoActualModalId && String(cargoActualModalId).startsWith("LOC-")) {
     const sigueExistiendo = AppState.cargosActivos.some(c => c.idCargo === cargoActualModalId);
     if (!sigueExistiendo) {
@@ -425,16 +417,13 @@ function handleRemoteSyncUpdate({ cargosActivos, historial }) {
     }
   }
 
-  // Conciliar e imprimir en A4 una vez que AppState.cargosActivos e AppState.historial ya están actualizados en memoria
   if (Array.isArray(cargosActivos) || Array.isArray(historial)) {
     resolverImpresionDiferidaOficial(AppState.cargosActivos, AppState.historial);
   }
 }
 
-
 window.forzarSincronizacionManual = async function (e) {
   if (e && typeof e.preventDefault === 'function') e.preventDefault();
-
   if (isManualSyncRunning) return;
 
   if (!navigator.onLine) {
@@ -459,61 +448,9 @@ window.forzarSincronizacionManual = async function (e) {
   }
 
   try {
-    if (typeof SyncEngine !== 'undefined' && typeof SyncEngine.processQueue === 'function') {
-      await SyncEngine.processQueue();
-    }
-
-    let pendingItems = [];
-    if (typeof SyncEngine !== 'undefined' && typeof SyncEngine.getQueueItems === 'function') {
-      pendingItems = await SyncEngine.getQueueItems();
-    }
-
-    if (pendingItems.length > 0) {
-      mostrarToast(`Aún hay ${pendingItems.length} registros pendientes por subir.`, "error");
-      return;
-    }
-
-    const bust = `_t=${Date.now()}&nocache=1`;
-    const tokenParam = encodeURIComponent(API_SECRET_TOKEN);
-
-    const [resCargos, resHistory] = await Promise.all([
-      fetch(`${API_URL}?action=getActiveCargos&token=${tokenParam}&${bust}`, {
-        method: "GET",
-        redirect: "follow",
-        cache: "no-store"
-      }),
-      fetch(`${API_URL}?action=getHistory&token=${tokenParam}&${bust}`, {
-        method: "GET",
-        redirect: "follow",
-        cache: "no-store"
-      })
-    ]);
-
-    if (!resCargos.ok || !resHistory.ok) {
-      throw new Error(`Error HTTP (${resCargos.status} / ${resHistory.status})`);
-    }
-
-    const jsonCargos = await resCargos.json();
-    const jsonHistory = await resHistory.json();
-
-    if (jsonCargos.status === "error") throw new Error(jsonCargos.message);
-    if (jsonHistory.status === "error") throw new Error(jsonHistory.message);
-
-    if (Array.isArray(jsonCargos.data)) {
-      await SyncEngine.saveCache('cargosActivos', jsonCargos.data);
-    }
-    if (Array.isArray(jsonHistory.data)) {
-      await SyncEngine.saveCache('historial', jsonHistory.data);
-    }
-
-    handleRemoteSyncUpdate({
-      cargosActivos: jsonCargos.data,
-      historial: jsonHistory.data
-    });
-
+    await SyncEngine.pullLatestState(true);
     renderizarCargosFiltrados();
     renderizarHistorico();
-
     mostrarToast("Datos sincronizados.");
   } catch (err) {
     console.error("[SyncManual] Error:", err);
@@ -525,10 +462,8 @@ window.forzarSincronizacionManual = async function (e) {
 
     let pendingCount = 0;
     try {
-      if (typeof SyncEngine !== 'undefined' && typeof SyncEngine.getQueueItems === 'function') {
-        const q = await SyncEngine.getQueueItems();
-        pendingCount = Array.isArray(q) ? q.length : 0;
-      }
+      const q = await SyncEngine.getQueueItems();
+      pendingCount = Array.isArray(q) ? q.length : 0;
     } catch (_) { }
 
     actualizarBadgeSync(pendingCount, navigator.onLine);
