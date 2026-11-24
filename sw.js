@@ -1,10 +1,9 @@
 /**
- * @fileoverview Service Worker - GenLogistics Embalajes (Offline App Shell v1.3.2)
- * @architecture Stale-While-Revalidate para App Shell | Network-Only para API GAS
+ * @fileoverview Service Worker - GenLogistics Embalajes (Offline App Shell)
+ * @architecture Cache-First para App Shell | Network-Only para API GAS
  */
 
-const CACHE_VERSION = 'genlogistics-embalajes-v1.4.1';
-const MEDIA_CACHE = 'genlogistics-media-v1';
+const CACHE_VERSION = 'genlogistics-embalajes-v1.1.4';
 
 // Recursos estáticos críticos que forman el App Shell (100% Zero-CDN)
 const APP_SHELL_ASSETS = [
@@ -22,10 +21,10 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_VERSION)
       .then((cache) => {
-        console.info('[SW] Pre-cacheando App Shell v1.3.2...');
+        console.info('[SW] Pre-cacheando App Shell de GenLogistics...');
         return cache.addAll(APP_SHELL_ASSETS);
       })
-      .then(() => self.skipWaiting())
+      .then(() => self.skipWaiting()) // Activar inmediatamente sin esperar cierre de pestañas
       .catch((err) => console.error('[SW] Error durante pre-cacheo:', err))
   );
 });
@@ -34,21 +33,19 @@ self.addEventListener('install', (event) => {
 // 2. ACTIVACIÓN: LIMPIEZA DE CACHÉS OBSOLETOS
 // ==========================================
 self.addEventListener('activate', (event) => {
-  const validCaches = new Set([CACHE_VERSION, MEDIA_CACHE]);
-
   event.waitUntil(
     caches.keys()
       .then((cacheNames) => {
         return Promise.all(
           cacheNames.map((cacheName) => {
-            if (!validCaches.has(cacheName)) {
+            if (cacheName !== CACHE_VERSION) {
               console.info('[SW] Eliminando caché antiguo:', cacheName);
               return caches.delete(cacheName);
             }
           })
         );
       })
-      .then(() => self.clients.claim())
+      .then(() => self.clients.claim()) // Tomar control inmediato de los clientes abiertos
   );
 });
 
@@ -56,63 +53,40 @@ self.addEventListener('activate', (event) => {
 // 3. INTERCEPTOR DE RED (FETCH)
 // ==========================================
 self.addEventListener('fetch', (event) => {
-  const request = event.request;
+  const requestUrl = new URL(event.request.url);
 
-  // REGLA 1: Solo interceptar GET sobre HTTP/HTTPS
-  if (request.method !== 'GET' || !request.url.startsWith('http')) return;
+  // REGLA 1: Ignorar peticiones que no sean GET (POST de SyncEngine van directo a red)
+  if (event.request.method !== 'GET') return;
 
-  const requestUrl = new URL(request.url);
-
-  // REGLA 2: Bypass total para API Google Apps Script (manejo exclusivo de SyncEngine)
+  // REGLA 2: Bypass total para Google Apps Script API y Google Drive (manejo exclusivo de SyncEngine)
   if (
     requestUrl.hostname.includes('script.google.com') ||
-    requestUrl.hostname.includes('script.googleusercontent.com')
+    requestUrl.hostname.includes('script.googleusercontent.com') ||
+    requestUrl.hostname.includes('drive.google.com')
   ) {
     return;
   }
 
-  // REGLA 3: Cache-First para fotos de vehículos/assets externos de imagen
-  if (request.destination === 'image' && requestUrl.origin !== self.location.origin) {
-    event.respondWith(
-      caches.open(MEDIA_CACHE).then(async (cache) => {
-        const cachedImg = await cache.match(request);
-        if (cachedImg) return cachedImg;
-
-        try {
-          const netImg = await fetch(request);
-          if (netImg && (netImg.status === 200 || netImg.type === 'opaque')) {
-            cache.put(request, netImg.clone());
-          }
-          return netImg;
-        } catch (e) {
-          return new Response('', { status: 408, statusText: 'Offline Image' });
-        }
-      })
-    );
-    return;
-  }
-
-  // REGLA 4: Stale-While-Revalidate con fallback blindado para el App Shell
+  // REGLA 3: Estrategia Stale-While-Revalidate para el App Shell
+  // Sirve desde caché en 0ms y actualiza el archivo en segundo plano si hay red
   event.respondWith(
-    caches.match(request, { ignoreSearch: true }).then((cachedResponse) => {
-      const fetchPromise = fetch(request)
+    caches.match(event.request).then((cachedResponse) => {
+      const fetchPromise = fetch(event.request)
         .then((networkResponse) => {
+          // Validar respuesta correcta antes de actualizar caché
           if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
             const responseToCache = networkResponse.clone();
             caches.open(CACHE_VERSION).then((cache) => {
-              cache.put(request, responseToCache);
+              cache.put(event.request, responseToCache);
             });
           }
           return networkResponse;
         })
-        .catch(async () => {
-          // Si estamos offline y no había match exacto, devolver index.html en navegaciones
-          if (request.mode === 'navigate') {
-            return caches.match('./index.html');
-          }
-          return cachedResponse;
+        .catch(() => {
+          // Si falla la red (modo offline), no hacer nada; ya devolvimos cachedResponse
         });
 
+      // Si existe en caché, devolver al instante (0ms); si no, esperar a la red
       return cachedResponse || fetchPromise;
     })
   );

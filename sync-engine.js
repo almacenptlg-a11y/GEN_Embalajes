@@ -1,7 +1,7 @@
 /**
  * @fileoverview Motor de Sincronización Offline-First (IndexedDB + Outbox Queue + Edge Compression)
- * @module SyncEngine (v1.3.2-OPT)
- * @architecture Zero-Latency Optimistic UI & Background Worker | Anti-Poison-Pill FIFO
+ * @module SyncEngine
+ * @architecture Zero-Latency Optimistic UI & Background Worker
  */
 
 const SyncEngine = (() => {
@@ -12,16 +12,15 @@ const SyncEngine = (() => {
 
     let db = null;
     let isSyncing = false;
-    let syncStartedAt = 0; // Watchdog anti-deadlock
     let pollingInterval = null;
     let config = {
         apiUrl: '',
         token: '',
         onQueueChange: () => {},      // Callback para actualizar badge en UI
         onRemoteDataSync: () => {},   // Callback cuando llegan datos frescos en segundo plano
-        onIdReconciled: () => {},     // Callback inmediato O(1) cuando GAS asigna el ID oficial GCM-*
         onSyncError: () => {}         // Callback silencioso o de log
     };
+
     // ==========================================
     // 1. INICIALIZACIÓN DE INDEXEDDB
     // ==========================================
@@ -84,9 +83,6 @@ const SyncEngine = (() => {
     // 3. GESTIÓN DE COLA OUTBOX (FIFO)
     // ==========================================
     function generateUUID() {
-        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-            return crypto.randomUUID();
-        }
         return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
             const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
             return v.toString(16);
@@ -95,10 +91,9 @@ const SyncEngine = (() => {
 
     async function enqueueMutation(action, payload) {
         return new Promise((resolve, reject) => {
-            if (!db) return reject('DB no inicializada');
             const tx = db.transaction(STORE_QUEUE, 'readwrite');
             const store = tx.objectStore(STORE_QUEUE);
-
+            
             const item = {
                 uuid: generateUUID(),
                 action: action,
@@ -120,14 +115,14 @@ const SyncEngine = (() => {
     }
 
     function getQueueItems() {
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             if (!db) return resolve([]);
             const tx = db.transaction(STORE_QUEUE, 'readonly');
             const store = tx.objectStore(STORE_QUEUE);
             const request = store.getAll();
 
             request.onsuccess = (e) => resolve(e.target.result || []);
-            request.onerror = () => resolve([]);
+            request.onerror = (e) => reject(e.target.error);
         });
     }
 
@@ -147,60 +142,10 @@ const SyncEngine = (() => {
         config.onQueueChange(items.length, navigator.onLine);
     }
 
-   // Reconcilia IDs temporales (LOC-*) en caché y notifica O(1) tras respuesta exitosa de GAS
-    async function reconcileServerIds(action, resultData) {
-        if (!resultData || typeof resultData !== 'object') return;
-
-        if (action === 'saveCargo' && resultData.localIdRef && resultData.idCargo) {
-            const cargos = await getCache('cargosActivos');
-            if (Array.isArray(cargos)) {
-                const target = cargos.find(c => c.idCargo === resultData.localIdRef);
-                if (target) {
-                    target.idCargo = resultData.idCargo;
-                    target.isLocalSyncPending = false;
-                    await saveCache('cargosActivos', cargos);
-                }
-            }
-
-            // Disparador determinista inmediato para UI / Auto-Print A4
-            config.onIdReconciled({
-                action: 'saveCargo',
-                localId: resultData.localIdRef,
-                officialId: resultData.idCargo
-            });
-        }
-
-        if (action === 'addDetalleCargo' && resultData.localDetalleRef && resultData.idDetalle) {
-            const cargos = await getCache('cargosActivos');
-            if (Array.isArray(cargos)) {
-                for (const c of cargos) {
-                    const det = (c.detalles || []).find(d => d.ID_DETALLE === resultData.localDetalleRef);
-                    if (det) {
-                        det.ID_DETALLE = resultData.idDetalle;
-                        await saveCache('cargosActivos', cargos);
-                        break;
-                    }
-                }
-            }
-
-            config.onIdReconciled({
-                action: 'addDetalleCargo',
-                localId: resultData.localDetalleRef,
-                officialId: resultData.idDetalle
-            });
-        }
-    }
-
     // ==========================================
     // 4. WORKER DE SINCRONIZACIÓN (PUSH & PULL)
     // ==========================================
     async function processQueue() {
-        // Watchdog: liberar lock si excedió 25s por microcorte de red
-        if (isSyncing && (Date.now() - syncStartedAt > 25000)) {
-            console.warn('[SyncEngine] Liberando lock de sincronización por timeout (>25s).');
-            isSyncing = false;
-        }
-
         if (isSyncing || !navigator.onLine) {
             await notifyQueueStatus();
             return;
@@ -213,17 +158,17 @@ const SyncEngine = (() => {
         }
 
         isSyncing = true;
-        syncStartedAt = Date.now();
         await notifyQueueStatus();
 
+        // Procesamiento estricto secuencial (FIFO) para mantener integridad referencial
         for (const item of queue) {
-            if (!navigator.onLine) break;
+            if (!navigator.onLine) break; // Abortar si se cae la red a mitad de lote
 
             try {
                 const bodyPayload = {
                     action: item.action,
                     token: config.token,
-                    client_uuid: item.uuid,
+                    client_uuid: item.uuid, // Clave de idempotencia para GAS
                     ...item.payload
                 };
 
@@ -235,107 +180,67 @@ const SyncEngine = (() => {
                 });
 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                
                 const result = await response.json();
 
                 if (result.status === 'success') {
-                    await reconcileServerIds(item.action, result.data);
+                    // Transacción confirmada por el servidor: eliminar de Outbox
                     await removeQueueItem(item.id);
                     await notifyQueueStatus();
                 } else {
-                    const msg = String(result.message || 'Error desconocido');
-                    console.error(`[SyncEngine] Rechazo del servidor en ${item.action}:`, msg);
-
-                    // Si el servidor estaba ocupado por LockService, detener y reintentar luego
-                    if (msg.toLowerCase().includes('servidor ocupado')) {
-                        break;
-                    }
-
-                    // Error lógico/permiso (Zero-Trust o fila inexistente): purgar para no bloquear cola FIFO
-                    config.onSyncError(msg, item);
-                    await removeQueueItem(item.id);
-                    await notifyQueueStatus();
+                    // Error lógico controlado desde GAS (ej. validación)
+                    console.error(`[SyncEngine] Rechazo del servidor en ${item.action}:`, result.message);
+                    config.onSyncError(result.message, item);
+                    // Opcional: Si es un error irrecuperable de negocio, remover para no atascar la cola
+                    if (result.fatal) await removeQueueItem(item.id);
+                    break;
                 }
             } catch (networkErr) {
-                console.warn('[SyncEngine] Microcorte de red durante Push:', networkErr);
-                break;
+                console.warn('[SyncEngine] Microcorte de red durante Push. Reintentando luego...', networkErr);
+                break; // Salir del bucle y esperar al próximo trigger/polling
             }
         }
 
         isSyncing = false;
-        syncStartedAt = 0;
         await notifyQueueStatus();
 
+        // Si la cola quedó limpia tras hacer Push, traer el estado real consolidado del servidor
         const remaining = await getQueueItems();
         if (remaining.length === 0 && navigator.onLine) {
-            await pullLatestState(false);
+            pullLatestState();
         }
     }
 
-    async function pullLatestState(force = false) {
-        if (!navigator.onLine) {
-            if (force) throw new Error("Sin conexión a internet.");
-            return false;
-        }
-
-        if (!force) {
-            const pending = await getQueueItems();
-            if (pending.length > 0 || isSyncing) return false;
-        } else {
-            const pending = await getQueueItems();
-            if (pending.length > 0) {
-                await processQueue();
-                const stillPending = await getQueueItems();
-                if (stillPending.length > 0) {
-                    throw new Error(`Hay ${stillPending.length} registro(s) local(es) sin poder subirse. Revisa tu conexión.`);
-                }
-            }
-        }
+    async function pullLatestState() {
+        // PROHIBIDO hacer Pull si hay cambios locales sin subir (evita sobrescribir Optimistic UI)
+        const pending = await getQueueItems();
+        if (pending.length > 0 || !navigator.onLine || isSyncing) return;
 
         try {
-            const bust = `_t=${Date.now()}`;
-            const tokenParam = encodeURIComponent(config.token);
-            const noCacheParam = force ? '&nocache=1' : '';
-
             const [resCargos, resHistory] = await Promise.all([
-                fetch(`${config.apiUrl}?action=getActiveCargos&token=${tokenParam}&${bust}${noCacheParam}`, {
-                    method: 'GET',
-                    redirect: 'follow',
-                    cache: 'no-store'
-                }),
-                fetch(`${config.apiUrl}?action=getHistory&token=${tokenParam}&${bust}${noCacheParam}`, {
-                    method: 'GET',
-                    redirect: 'follow',
-                    cache: 'no-store'
-                })
+                fetch(`${config.apiUrl}?action=getActiveCargos&token=${config.token}`, { redirect: 'follow' }),
+                fetch(`${config.apiUrl}?action=getHistory&token=${config.token}`, { redirect: 'follow' })
             ]);
-
-            if (!resCargos.ok || !resHistory.ok) {
-                throw new Error(`HTTP Error (${resCargos.status} / ${resHistory.status})`);
-            }
 
             const jsonCargos = await resCargos.json();
             const jsonHistory = await resHistory.json();
 
-            if (jsonCargos.status === 'error') throw new Error(jsonCargos.message);
-            if (jsonHistory.status === 'error') throw new Error(jsonHistory.message);
-
-            if (jsonCargos.status === 'success' && Array.isArray(jsonCargos.data)) {
+            if (jsonCargos.status === 'success') {
                 await saveCache('cargosActivos', jsonCargos.data);
             }
-            if (jsonHistory.status === 'success' && Array.isArray(jsonHistory.data)) {
+            if (jsonHistory.status === 'success') {
                 await saveCache('historial', jsonHistory.data);
             }
 
+            // Notificar a la UI para que repinte silenciosamente si es necesario
             config.onRemoteDataSync({
                 cargosActivos: jsonCargos.status === 'success' ? jsonCargos.data : null,
                 historial: jsonHistory.status === 'success' ? jsonHistory.data : null
             });
 
-            return true;
         } catch (err) {
-            if (force) throw err;
-            console.debug('[SyncEngine] Background pull omitido:', err.message);
-            return false;
+            // Silencioso: si falla el pull en segundo plano, el usuario sigue trabajando con IndexedDB
+            console.debug('[SyncEngine] Background pull omitido por red inestable.');
         }
     }
 
@@ -382,13 +287,13 @@ const SyncEngine = (() => {
         const scale = cropW > maxWidth ? maxWidth / cropW : 1;
 
         const offscreen = document.createElement('canvas');
-        offscreen.width = Math.round(cropW * scale);
-        offscreen.height = Math.round(cropH * scale);
+        offscreen.width = cropW * scale;
+        offscreen.height = cropH * scale;
 
         const offCtx = offscreen.getContext('2d');
         offCtx.drawImage(sourceCanvas, minX, minY, cropW, cropH, 0, 0, offscreen.width, offscreen.height);
 
-        // Retorna PNG recortado (~4KB - 8KB frente a los ~60KB originales)
+        // Retorna PNG recortado (peso típico: ~4KB - 8KB frente a los ~60KB originales)
         return offscreen.toDataURL('image/png');
     }
 
@@ -399,6 +304,7 @@ const SyncEngine = (() => {
         config = { ...config, ...userConfig };
         await initDB();
 
+        // Listeners nativos de conectividad
         window.addEventListener('online', () => {
             console.info('[SyncEngine] Conexión restaurada. Ejecutando sincronización...');
             processQueue();
@@ -409,17 +315,19 @@ const SyncEngine = (() => {
             notifyQueueStatus();
         });
 
+        // Heartbeat Polling cada 30 segundos
         if (pollingInterval) clearInterval(pollingInterval);
         pollingInterval = setInterval(() => {
             if (!navigator.onLine) return;
             getQueueItems().then(items => {
                 if (items.length > 0) processQueue();
-                else pullLatestState(false);
+                else pullLatestState();
             });
         }, 30000);
 
         await notifyQueueStatus();
-
+        
+        // Intentar vaciar cola residual al arrancar
         if (navigator.onLine) processQueue();
     }
 
@@ -428,7 +336,6 @@ const SyncEngine = (() => {
         saveCache,
         getCache,
         enqueueMutation,
-        getQueue: getQueueItems,
         getQueueItems,
         processQueue,
         pullLatestState,
